@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生成图标 - 飞书记录助手</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f7fa;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .icon-preview {
+            display: flex;
+            justify-content: space-around;
+            margin: 30px 0;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .icon-item {
+            text-align: center;
+        }
+        canvas {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        .instructions {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 30px;
+        }
+        .instructions h3 {
+            color: #667eea;
+            margin-top: 0;
+        }
+        .instructions ol {
+            padding-left: 20px;
+        }
+        .instructions li {
+            margin: 10px 0;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 飞书记录助手 - 图标生成器</h1>
+        
+        <div class="icon-preview">
+            <div class="icon-item">
+                <canvas id="canvas16" width="16" height="16"></canvas>
+                <p>16x16</p>
+            </div>
+            <div class="icon-item">
+                <canvas id="canvas48" width="48" height="48"></canvas>
+                <p>48x48</p>
+            </div>
+            <div class="icon-item">
+                <canvas id="canvas128" width="128" height="128"></canvas>
+                <p>128x128</p>
+            </div>
+        </div>
+        
+        <div style="text-align: center;">
+            <button onclick="generateIcons()">生成图标</button>
+            <button onclick="downloadAll()">下载所有图标</button>
+        </div>
+        
+        <div class="instructions">
+            <h3>📋 使用说明</h3>
+            <ol>
+                <li>点击"生成图标"按钮生成三个尺寸的图标</li>
+                <li>点击"下载所有图标"下载图标文件</li>
+                <li>将下载的图标文件（icon16.png、icon48.png、icon128.png）保存到 <code>icons</code> 目录下</li>
+                <li>确保文件名与代码中的引用一致</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        function generateIcons() {
+            drawIcon('canvas16', 16);
+            drawIcon('canvas48', 48);
+            drawIcon('canvas128', 128);
+        }
+
+        function drawIcon(canvasId, size) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            
+            // 清空画布
+            ctx.clearRect(0, 0, size, size);
+            
+            // 创建渐变背景
+            const gradient = ctx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, '#667eea');
+            gradient.addColorStop(1, '#764ba2');
+            
+            // 绘制圆角矩形背景
+            const radius = size * 0.2;
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.moveTo(radius, 0);
+            ctx.lineTo(size - radius, 0);
+            ctx.quadraticCurveTo(size, 0, size, radius);
+            ctx.lineTo(size, size - radius);
+            ctx.quadraticCurveTo(size, size, size - radius, size);
+            ctx.lineTo(radius, size);
+            ctx.quadraticCurveTo(0, size, 0, size - radius);
+            ctx.lineTo(0, radius);
+            ctx.quadraticCurveTo(0, 0, radius, 0);
+            ctx.closePath();
+            ctx.fill();
+            
+            // 绘制表格图标
+            const padding = size * 0.2;
+            const tableWidth = size - padding * 2;
+            const tableHeight = size * 0.5;
+            const startX = padding;
+            const startY = padding * 2;
+            
+            // 绘制表格外框
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.fillRect(startX, startY, tableWidth, tableHeight);
+            
+            // 绘制表格行
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            const rowHeight = tableHeight / 4;
+            for (let i = 1; i < 4; i++) {
+                ctx.fillRect(startX, startY + rowHeight * i, tableWidth, 1);
+            }
+            
+            // 绘制表格列
+            const colWidth = tableWidth / 3;
+            for (let i = 1; i < 3; i++) {
+                ctx.fillRect(startX + colWidth * i, startY, 1, tableHeight);
+            }
+            
+            // 绘制标题栏
+            ctx.fillStyle = 'rgba(102, 126, 234, 0.2)';
+            ctx.fillRect(startX, startY, tableWidth, rowHeight);
+        }
+
+        function downloadAll() {
+            downloadIcon('canvas16', 'icon16.png');
+            downloadIcon('canvas48', 'icon48.png');
+            downloadIcon('canvas128', 'icon128.png');
+        }
+
+        function downloadIcon(canvasId, filename) {
+            const canvas = document.getElementById(canvasId);
+            const link = document.createElement('a');
+            link.download = filename;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        // 页面加载时自动生成图标
+        window.onload = generateIcons;
+    </script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>飞书记录助手</title>
+    <link rel="stylesheet" href="../styles/popup.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 未配置状态 -->
+        <div id="notConfigured" class="state-message">
+            <div class="icon">⚙️</div>
+            <h2>未配置</h2>
+            <p>请先配置飞书应用信息</p>
+            <button id="goToConfig" class="btn btn-primary">去配置</button>
+        </div>
+
+        <!-- 表格选择状态 -->
+        <div id="tableSelection" style="display: none;">
+            <h1>选择多维表格</h1>
+            <div id="bitableList" class="bitable-list"></div>
+        </div>
+
+        <!-- 数据输入状态 -->
+        <div id="dataInput" style="display: none;">
+            <div class="header">
+                <h1>记录数据</h1>
+                <button id="changeTable" class="btn-text">切换表格</button>
+            </div>
+            
+            <div class="table-info">
+                <span id="tableName"></span>
+            </div>
+
+            <div id="inputFields" class="input-fields"></div>
+
+            <button id="submitRecord" class="btn btn-primary">记录数据</button>
+            <span id="submitResult"></span>
+        </div>
+
+        <!-- 加载中状态 -->
+        <div id="loading" class="state-message" style="display: none;">
+            <div class="spinner"></div>
+            <p>加载中...</p>
+        </div>
+    </div>
+
+    <script src="../utils/api.js"></script>
+    <script src="popup.js"></script>
+</body>
+</html>

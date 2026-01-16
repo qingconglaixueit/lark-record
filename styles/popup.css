@@ -1,0 +1,275 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    width: 400px;
+    min-height: 500px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #333;
+}
+
+.container {
+    background: white;
+    min-height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* 状态消息 */
+.state-message {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    text-align: center;
+}
+
+.state-message .icon {
+    font-size: 64px;
+    margin-bottom: 20px;
+}
+
+.state-message h2 {
+    font-size: 24px;
+    color: #333;
+    margin-bottom: 10px;
+}
+
+.state-message p {
+    color: #666;
+    font-size: 14px;
+    margin-bottom: 30px;
+}
+
+/* 按钮 */
+.btn {
+    padding: 12px 30px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-text {
+    background: none;
+    border: none;
+    color: #667eea;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 5px 10px;
+    transition: color 0.3s;
+}
+
+.btn-text:hover {
+    color: #764ba2;
+    text-decoration: underline;
+}
+
+/* 表格选择 */
+#tableSelection {
+    padding: 20px;
+}
+
+#tableSelection h1 {
+    color: #333;
+    font-size: 20px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.bitable-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.bitable-card {
+    display: flex;
+    align-items: center;
+    padding: 15px;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #f5f7fa 0%, #e8eef5 100%);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 0.3s;
+    border: 2px solid transparent;
+}
+
+.bitable-card:hover {
+    background: linear-gradient(135deg, #e8eef5 0%, #d9e2f0 100%);
+    border-color: #667eea;
+    transform: translateX(5px);
+}
+
+.bitable-icon {
+    font-size: 32px;
+    margin-right: 15px;
+}
+
+.bitable-info {
+    flex: 1;
+}
+
+.bitable-name {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.bitable-id {
+    font-size: 12px;
+    color: #888;
+    word-break: break-all;
+}
+
+/* 数据输入 */
+#dataInput {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.header h1 {
+    color: #333;
+    font-size: 20px;
+}
+
+.table-info {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.input-fields {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 350px;
+    margin-bottom: 20px;
+}
+
+.field-group {
+    margin-bottom: 20px;
+}
+
+.field-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #555;
+    font-size: 14px;
+}
+
+.field-input {
+    width: 100%;
+    padding: 12px 15px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: all 0.3s;
+}
+
+.field-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.field-input.has-value {
+    border-color: #10b981;
+}
+
+#submitResult {
+    margin-left: 15px;
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.success {
+    color: #10b981;
+}
+
+.error {
+    color: #ef4444;
+}
+
+/* 加载动画 */
+.spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.no-data {
+    text-align: center;
+    color: #888;
+    padding: 40px 20px;
+    font-style: italic;
+}
+
+/* 滚动条样式 */
+.bitable-list::-webkit-scrollbar,
+.input-fields::-webkit-scrollbar {
+    width: 8px;
+}
+
+.bitable-list::-webkit-scrollbar-track,
+.input-fields::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 8px;
+}
+
+.bitable-list::-webkit-scrollbar-thumb,
+.input-fields::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 8px;
+}
+
+.bitable-list::-webkit-scrollbar-thumb:hover,
+.input-fields::-webkit-scrollbar-thumb:hover {
+    background: #a1a1a1;
+}

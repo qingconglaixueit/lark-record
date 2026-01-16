@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>飞书记录助手 - 配置</title>
+    <link rel="stylesheet" href="../styles/options.css">
+</head>
+<body>
+    <div class="container">
+        <h1>飞书记录助手配置</h1>
+        
+        <!-- 飞书应用配置 -->
+        <div class="section">
+            <h2>1. 飞书应用配置</h2>
+            <div class="form-group">
+                <label for="appId">应用ID (App ID)</label>
+                <input type="text" id="appId" placeholder="cli_xxxxxxxxxxxxxxxx">
+            </div>
+            <div class="form-group">
+                <label for="appSecret">应用密钥 (App Secret)</label>
+                <input type="text" id="appSecret" placeholder="xxxxxxxxxxxxxxxx">
+            </div>
+            <button id="testConfig" class="btn btn-secondary">测试配置</button>
+            <span id="testResult"></span>
+        </div>
+
+        <!-- 多维表格选择 -->
+        <div class="section" id="bitableSection" style="display: none;">
+            <h2>2. 选择多维表格</h2>
+            
+            <!-- 方式1: 手动输入多维表格地址 -->
+            <div class="form-group">
+                <label for="manualAppToken">飞书多维表格地址（推荐）</label>
+                <input type="text" id="manualAppToken" placeholder="https://xxx.feishu.cn/base/bascnxxxxxxxxxxxxxxx">
+                <small class="help-text">
+                    如何获取表格地址：<br>
+                    1. 在飞书中打开目标多维表格（支持个人空间、知识库、群组中的表格）<br>
+                    2. 在浏览器地址栏中复制完整链接<br>
+                    3. 将链接粘贴到此处<br>
+                    <br>
+                    支持的链接格式：<br>
+                    • 普通多维表格：https://xxx.feishu.cn/base/bascnxxxxxxxxxxxxxxx<br>
+                    • 知识库中的表格：https://xxx.feishu.cn/wiki/bascnxxxxxxxxxxxxxxx<br>
+                    • 带表单参数：https://xxx.feishu.cn/base/bascnxxxxxxxxxxxxxxx?table=xxxxx
+                </small>
+            </div>
+            <button id="useManualToken" class="btn btn-secondary">验证并使用表格</button>
+            
+            <!-- 方式2: 从列表选择 -->
+            <div style="margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 20px;">
+                <p>或者从已创建的多维表格中选择：</p>
+                <button id="loadBitables" class="btn btn-secondary">加载多维表格</button>
+                <div id="bitableList" class="item-list"></div>
+            </div>
+            
+            <div id="bitableDetails" style="display: none;">
+                <div class="form-group">
+                    <label for="tableSelect">选择数据表</label>
+                    <select id="tableSelect">
+                        <option value="">请选择数据表</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>待写入字段（必填）</label>
+                    <div id="writeFieldsList" class="checkbox-list"></div>
+                </div>
+                <div class="form-group">
+                    <label>需检测的字段（用于判断是否完成）</label>
+                    <div id="checkFieldsList" class="checkbox-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 消息通知配置 -->
+        <div class="section" id="messageSection" style="display: none;">
+            <h2>3. 消息通知配置</h2>
+            <div class="form-group">
+                <label for="groupChatId">群聊ID（用于发送完成通知）</label>
+                <input type="text" id="groupChatId" placeholder="oc_xxxxxxxxxxxxxxxx">
+                <small class="help-text">从飞书群聊设置中获取群聊ID</small>
+            </div>
+        </div>
+
+        <!-- 保存配置 -->
+        <div class="section">
+            <button id="saveConfig" class="btn btn-primary">保存配置</button>
+            <span id="saveResult"></span>
+        </div>
+
+        <!-- 当前配置显示 -->
+        <div class="section">
+            <h2>当前配置</h2>
+            <div id="currentConfig"></div>
+        </div>
+    </div>
+
+    <script src="../utils/api.js"></script>
+    <script src="../utils/storage.js"></script>
+    <script src="options.js"></script>
+</body>
+</html>
