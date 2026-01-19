@@ -13,63 +13,88 @@
         <!-- 飞书应用配置 -->
         <div class="section">
             <h2>1. 飞书应用配置</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <div style="flex: 1;"></div>
+                <button id="useDefaultConfig" class="btn" style="background: #10b981; color: white; padding: 8px 16px; font-size: 14px;">
+                    ⚡ 使用内置配置
+                </button>
+            </div>
             <div class="form-group">
                 <label for="appId">应用ID (App ID)</label>
                 <input type="text" id="appId" placeholder="cli_xxxxxxxxxxxxxxxx">
             </div>
             <div class="form-group">
                 <label for="appSecret">应用密钥 (App Secret)</label>
-                <input type="text" id="appSecret" placeholder="xxxxxxxxxxxxxxxx">
+                <input type="password" id="appSecret" placeholder="xxxxxxxxxxxxxxxx">
+                <small class="help-text">密钥将被隐藏显示</small>
             </div>
             <button id="testConfig" class="btn btn-secondary">测试配置</button>
             <span id="testResult"></span>
         </div>
 
-        <!-- 多维表格选择 -->
+        <!-- 多维表格配置 -->
         <div class="section" id="bitableSection" style="display: none;">
-            <h2>2. 选择多维表格</h2>
+            <h2>2. 配置多维表格</h2>
             
-            <!-- 方式1: 手动输入多维表格地址 -->
             <div class="form-group">
-                <label for="manualAppToken">飞书多维表格地址（推荐）</label>
-                <input type="text" id="manualAppToken" placeholder="https://xxx.feishu.cn/base/bascnxxxxxxxxxxxxxxx">
-                <small class="help-text">
-                    如何获取表格地址：<br>
-                    1. 在飞书中打开目标多维表格（支持个人空间、知识库、群组中的表格）<br>
-                    2. 在浏览器地址栏中复制完整链接<br>
-                    3. 将链接粘贴到此处<br>
-                    <br>
-                    支持的链接格式：<br>
-                    • 普通多维表格：https://xxx.feishu.cn/base/bascnxxxxxxxxxxxxxxx<br>
-                    • 知识库中的表格：https://xxx.feishu.cn/wiki/bascnxxxxxxxxxxxxxxx<br>
-                    • 带表单参数：https://xxx.feishu.cn/base/bascnxxxxxxxxxxxxxxx?table=xxxxx
-                </small>
+                <label style="font-size: 16px; font-weight: 600; margin-bottom: 15px; display: block;">飞书多维表格URL</label>
+                
+                <!-- URL类型说明 -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                    <!-- 直接多维表格 -->
+                    <div style="padding: 15px; background: #eff6ff; border: 2px solid #3b82f6; border-radius: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <span style="font-size: 20px;">📄</span>
+                            <strong style="color: #1e40af;">直接多维表格</strong>
+                        </div>
+                        <div style="font-size: 13px; color: #1e40af; margin-bottom: 8px;">
+                            在个人空间或群组中直接创建的多维表格
+                        </div>
+                        <div style="background: white; padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px; word-break: break-all;">
+                            https://xxx.feishu.cn<span style="color: #ef4444; font-weight: bold;">/base/</span>bascnxxxxxxx
+                        </div>
+                    </div>
+                    
+                    <!-- 知识库中的表格 -->
+                    <div style="padding: 15px; background: #f0fdf4; border: 2px solid #10b981; border-radius: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <span style="font-size: 20px;">📖</span>
+                            <strong style="color: #065f46;">知识库中的表格</strong>
+                        </div>
+                        <div style="font-size: 13px; color: #065f46; margin-bottom: 8px;">
+                            在飞书知识库中嵌入的多维表格
+                        </div>
+                        <div style="background: white; padding: 8px; border-radius: 4px; font-family: monospace; font-size: 11px; word-break: break-all; margin-bottom: 8px;">
+                            https://xxx.feishu.cn<span style="color: #ef4444; font-weight: bold;">/base/</span>bascnxxxxxxx
+                        </div>
+                        <div style="font-size: 12px; color: #065f46; background: #d1fae5; padding: 6px; border-radius: 4px;">
+                            ⚠️ <strong>重要</strong>：在wiki页面中，点击表格右上角的“···”按钮，选择“在新窗口中打开”，然后复制新窗口的URL（包含 /base/）
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: start; gap: 8px;">
+                        <span style="font-size: 18px;">⚠️</span>
+                        <div style="flex: 1;">
+                            <strong style="color: #92400e;">如何获取URL：</strong>
+                            <ol style="margin: 8px 0 0 0; padding-left: 20px; color: #92400e; font-size: 14px;">
+                                <li>在飞书中打开你的多维表格</li>
+                                <li>复制浏览器地址栏中的<strong>完整链接</strong></li>
+                                <li>粘贴到下方输入框中</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <button id="useManualToken" class="btn btn-secondary">验证并使用表格</button>
             
-            <!-- 方式2: 从列表选择 -->
-            <div style="margin-top: 20px; border-top: 1px solid #e0e0e0; padding-top: 20px;">
-                <p>或者从已创建的多维表格中选择：</p>
-                <button id="loadBitables" class="btn btn-secondary">加载多维表格</button>
-                <div id="bitableList" class="item-list"></div>
+            <div id="tableUrlsContainer">
+                <!-- 动态生成的URL输入框 -->
             </div>
             
-            <div id="bitableDetails" style="display: none;">
-                <div class="form-group">
-                    <label for="tableSelect">选择数据表</label>
-                    <select id="tableSelect">
-                        <option value="">请选择数据表</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>待写入字段（必填）</label>
-                    <div id="writeFieldsList" class="checkbox-list"></div>
-                </div>
-                <div class="form-group">
-                    <label>需检测的字段（用于判断是否完成）</label>
-                    <div id="checkFieldsList" class="checkbox-list"></div>
-                </div>
-            </div>
+            <button id="addTableUrl" class="btn btn-secondary" style="margin-top: 10px; padding: 12px 24px; font-size: 15px; font-weight: 600;">
+                <span style="font-size: 20px; font-weight: bold;">+</span> 添加多维表格
+            </button>
         </div>
 
         <!-- 消息通知配置 -->

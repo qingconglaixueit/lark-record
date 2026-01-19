@@ -4,16 +4,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const appSecretInput = document.getElementById('appSecret');
     const testConfigBtn = document.getElementById('testConfig');
     const testResult = document.getElementById('testResult');
+    const useDefaultConfigBtn = document.getElementById('useDefaultConfig');
     
     const bitableSection = document.getElementById('bitableSection');
-    const manualAppTokenInput = document.getElementById('manualAppToken');
-    const useManualTokenBtn = document.getElementById('useManualToken');
-    const loadBitablesBtn = document.getElementById('loadBitables');
-    const bitableList = document.getElementById('bitableList');
-    const bitableDetails = document.getElementById('bitableDetails');
-    const tableSelect = document.getElementById('tableSelect');
-    const writeFieldsList = document.getElementById('writeFieldsList');
-    const checkFieldsList = document.getElementById('checkFieldsList');
+    const tableUrlsContainer = document.getElementById('tableUrlsContainer');
+    const addTableUrlBtn = document.getElementById('addTableUrl');
     
     const messageSection = document.getElementById('messageSection');
     const groupChatIdInput = document.getElementById('groupChatId');
@@ -26,17 +21,27 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentConfigData = {
         app_id: '',
         app_secret: '',
-        table_id: '',
-        write_fields: [],
-        check_fields: [],
+        tables: [],
         group_chat_id: ''
     };
 
-    let selectedBitable = null;
-    let allFields = [];
+    // 内置的默认配置
+    const DEFAULT_CONFIG = {
+        app_id: 'cli_a9d27bd8db78dbb4',
+        app_secret: 'swcvzxSrgtxMQsSr4YMyLfPdTnbbAibe'
+    };
 
     // 加载已保存的配置
     loadSavedConfig();
+    
+    // 使用内置配置按钮
+    useDefaultConfigBtn.addEventListener('click', function() {
+        if (confirm('确定要使用内置的飞书应用配置吗？')) {
+            appIdInput.value = DEFAULT_CONFIG.app_id;
+            appSecretInput.value = DEFAULT_CONFIG.app_secret;
+            showTestResult('已加载内置配置，请点击“测试配置”验证', true);
+        }
+    });
 
     // 测试配置按钮
     testConfigBtn.addEventListener('click', async function() {
@@ -56,9 +61,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const testConfig = {
                 app_id: appId,
                 app_secret: appSecret,
-                table_id: '',
-                write_fields: [],
-                check_fields: [],
+                tables: [],
                 group_chat_id: ''
             };
 
@@ -75,8 +78,14 @@ document.addEventListener('DOMContentLoaded', function() {
             if (response.ok) {
                 showTestResult('配置有效！', true);
                 bitableSection.style.display = 'block';
+                messageSection.style.display = 'block';
                 currentConfigData.app_id = appId;
                 currentConfigData.app_secret = appSecret;
+                
+                // 初始化一个空的表格输入框
+                if (tableUrlsContainer.children.length === 0) {
+                    addTableUrlRow();
+                }
             } else {
                 showTestResult('配置无效: ' + result.error, false);
             }
@@ -87,26 +96,38 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // 从飞书链接中提取 App Token
+    // 从URL中提取App Token和Table ID
+    // 返回值：{ appToken: string, isWiki: boolean, tableId: string }
     function extractAppTokenFromURL(url) {
         try {
-            // 支持的链接格式：
-            // 1. https://xxx.feishu.cn/base/bascnxxxxxxxxxxxxxxx
-            // 2. https://xxx.feishu.cn/wiki/bascnxxxxxxxxxxxxxxx
-            // 3. https://xxx.feishu.cn/base/bascnxxxxxxxxxxxxxxx?table=xxxxx
-            
             const urlObj = new URL(url);
             const pathParts = urlObj.pathname.split('/');
             
-            // 查找路径中包含 'base' 或 'wiki' 的部分
+            // 提取URL中的table参数（如果存在）
+            const tableId = urlObj.searchParams.get('table');
+            
+            // 方式1: 查找路径中包含 'base' 的部分（直接多维表格链接）
             for (let i = 0; i < pathParts.length; i++) {
                 const part = pathParts[i];
-                if (part === 'base' || part === 'wiki') {
-                    // 下一部分就是 App Token
+                if (part === 'base') {
                     if (i + 1 < pathParts.length) {
                         const appToken = pathParts[i + 1];
-                        if (appToken && appToken.length > 10) { // App Token 通常比较长
-                            return appToken;
+                        if (appToken && appToken.length > 10) {
+                            return { appToken, isWiki: false, tableId };
+                        }
+                    }
+                }
+            }
+            
+            // 方式2: 查找路径中包含 'wiki' 的部分（知识库中的多维表格）
+            for (let i = 0; i < pathParts.length; i++) {
+                const part = pathParts[i];
+                if (part === 'wiki') {
+                    if (i + 1 < pathParts.length) {
+                        const wikiToken = pathParts[i + 1];
+                        if (wikiToken && wikiToken.length > 10) {
+                            // wiki链接中，URL路径的token就是app_token
+                            return { appToken: wikiToken, isWiki: true, tableId };
                         }
                     }
                 }
@@ -114,7 +135,10 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // 如果没有找到，尝试直接使用输入的值
             if (url.length > 10 && (url.startsWith('bascn') || url.startsWith('app'))) {
-                return url;
+                return { appToken: url, isWiki: false, tableId };
+            }
+            if (url.length > 10 && url.startsWith('wiki')) {
+                return { appToken: url, isWiki: true, tableId };
             }
             
             return null;
@@ -124,28 +148,104 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // 使用手动输入的飞书链接
-    useManualTokenBtn.addEventListener('click', async function() {
-        const inputURL = manualAppTokenInput.value.trim();
+    // 添加表格URL输入行
+    function addTableUrlRow(tableConfig = null) {
+        const rowId = Date.now();
+        const row = document.createElement('div');
+        row.className = 'table-url-row';
+        row.dataset.rowId = rowId;
+        row.style.cssText = 'margin-bottom: 15px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px; background: #f9fafb;';
         
-        if (!inputURL) {
-            alert('请输入飞书多维表格的完整地址');
+        row.innerHTML = `
+            <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px;">
+                <input type="text" 
+                       class="table-url-input" 
+                       placeholder="粘贴飞书多维表格URL（支持 /base/ 或 /wiki/ 链接）"
+                       value="${tableConfig?.url || ''}"
+                       style="flex: 1; padding: 10px; border: 2px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                <button class="verify-table-btn btn btn-secondary" style="padding: 10px 20px; white-space: nowrap; font-weight: 600;">
+                    🔍 验证
+                </button>
+                <button class="remove-table-btn" style="padding: 10px 16px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                    ✕ 删除
+                </button>
+            </div>
+            <div class="table-details" style="display: none;">
+                <div style="margin-bottom: 10px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500;">表格名称</label>
+                    <input type="text" class="table-name-input" placeholder="表格名称（选填）" value="${tableConfig?.name || ''}"
+                           style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500;">选择数据表</label>
+                    <select class="table-id-select" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <option value="">请选择数据表</option>
+                    </select>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500;">待写入字段（至少选一个）</label>
+                    <div class="write-fields-list" style="max-height: 150px; overflow-y: auto; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;"></div>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500;">需检测的字段（选填）</label>
+                    <div class="check-fields-list" style="max-height: 150px; overflow-y: auto; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;"></div>
+                </div>
+            </div>
+            <div class="verification-status" style="margin-top: 10px; padding: 8px; border-radius: 6px; display: none;"></div>
+        `;
+        
+        tableUrlsContainer.appendChild(row);
+        
+        // 绑定事件
+        const verifyBtn = row.querySelector('.verify-table-btn');
+        const removeBtn = row.querySelector('.remove-table-btn');
+        const tableIdSelect = row.querySelector('.table-id-select');
+        
+        // 验证按钮
+        verifyBtn.addEventListener('click', () => verifyTableUrl(row));
+        
+        // 删除按钮
+        removeBtn.addEventListener('click', () => row.remove());
+        
+        // 数据表选择变化时加载字段
+        tableIdSelect.addEventListener('change', () => loadTableFields(row));
+        
+        // 如果有初始配置，自动验证
+        if (tableConfig?.url) {
+            setTimeout(() => verifyTableUrl(row), 100);
+        }
+        
+        return row;
+    }
+
+    // 验证表格URL
+    async function verifyTableUrl(row) {
+        const urlInput = row.querySelector('.table-url-input');
+        const verifyBtn = row.querySelector('.verify-table-btn');
+        const tableDetails = row.querySelector('.table-details');
+        const statusDiv = row.querySelector('.verification-status');
+        
+        const url = urlInput.value.trim();
+        
+        if (!url) {
+            showVerificationStatus(statusDiv, '请输入表格URL', false);
             return;
         }
         
-        // 从URL中提取App Token
-        const appToken = extractAppTokenFromURL(inputURL);
+        const tokenInfo = extractAppTokenFromURL(url);
         
-        if (!appToken) {
-            alert('无法从输入的链接中提取 App Token，请检查链接格式是否正确');
+        if (!tokenInfo) {
+            showVerificationStatus(statusDiv, '无法从链接中提取Token，请确保输入的是多维表格链接（包含 /base/ 或 /wiki/）', false);
             return;
         }
         
-        useManualTokenBtn.disabled = true;
-        useManualTokenBtn.textContent = '验证中...';
+        const appToken = tokenInfo.appToken;
+        const urlTableId = tokenInfo.tableId; // 从URL中提取的table ID
+        
+        verifyBtn.disabled = true;
+        verifyBtn.textContent = '验证中...';
         
         try {
-            // 尝试加载该表格的数据表列表来验证访问权限
             const response = await fetch(`http://localhost:8080/api/bitables/tables?app_token=${appToken}`);
             const result = await response.json();
             
@@ -153,198 +253,186 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error(result.error || '无法访问该多维表格');
             }
             
-            // 验证成功，显示结果
             if (result.length === 0) {
                 throw new Error('该多维表格没有数据表');
             }
             
-            selectedBitable = {
-                app_token: appToken,
-                name: '手动输入的表格'
-            };
-            
-            // 清空列表显示
-            bitableList.innerHTML = `
-                <div style="padding: 15px; background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px; color: #0c4a6e;">
-                    <strong>✓ 表格验证成功！</strong><br>
-                    App Token: ${appToken}<br>
-                    该表格可以正常访问，包含 ${result.length} 个数据表
-                </div>
-            `;
-            
-            // 加载该表格的数据表
-            await loadTables(appToken);
-            bitableDetails.style.display = 'block';
-            
-        } catch (error) {
-            alert('表格验证失败: ' + error.message);
-            bitableList.innerHTML = `
-                <div style="padding: 15px; background: #fef2f2; border: 1px solid #ef4444; border-radius: 8px; color: #7f1d1d;">
-                    <strong>✗ 表格验证失败</strong><br>
-                    提取的 App Token: ${appToken}<br>
-                    错误信息: ${error.message}
-                </div>
-            `;
-        } finally {
-            useManualTokenBtn.disabled = false;
-            useManualTokenBtn.textContent = '验证并使用表格';
-        }
-    });
-
-    // 加载多维表格按钮
-    loadBitablesBtn.addEventListener('click', async function() {
-        try {
-            const response = await fetch('http://localhost:8080/api/bitables');
-            const bitables = await response.json();
-
-            if (!response.ok) {
-                throw new Error(bitables.error || '获取失败');
-            }
-
-            displayBitables(bitables);
-        } catch (error) {
-            alert('加载多维表格失败: ' + error.message);
-        }
-    });
-
-    // 显示多维表格列表
-    function displayBitables(bitables) {
-        bitableList.innerHTML = '';
-
-        if (bitables.length === 0) {
-            bitableList.innerHTML = '<p class="no-data">未找到多维表格</p>';
-            return;
-        }
-
-        bitables.forEach(bitable => {
-            const item = document.createElement('div');
-            item.className = 'item-card';
-            item.innerHTML = `
-                <input type="radio" name="bitable" value="${bitable.app_token}" data-name="${bitable.name}">
-                <label>${bitable.name}</label>
-            `;
-            bitableList.appendChild(item);
-        });
-
-        // 绑定选择事件
-        bitableList.querySelectorAll('input[name="bitable"]').forEach(radio => {
-            radio.addEventListener('change', async function() {
-                selectedBitable = {
-                    app_token: this.value,
-                    name: this.dataset.name
-                };
-                await loadTables(this.value);
-                bitableDetails.style.display = 'block';
-            });
-        });
-    }
-
-    // 加载数据表
-    async function loadTables(appToken) {
-        try {
-            const response = await fetch(`http://localhost:8080/api/bitables/tables?app_token=${appToken}`);
-            const tables = await response.json();
-
-            tableSelect.innerHTML = '<option value="">请选择数据表</option>';
-            tables.forEach(tableId => {
+            // 显示数据表列表（现在包含table_id和table_name）
+            const tableIdSelect = row.querySelector('.table-id-select');
+            tableIdSelect.innerHTML = '<option value="">请选择数据表</option>';
+            result.forEach(table => {
                 const option = document.createElement('option');
-                option.value = tableId;
-                option.textContent = `表格 ${tableId}`;
-                tableSelect.appendChild(option);
+                option.value = table.table_id;
+                option.textContent = table.name ? `${table.name} (${table.table_id})` : `表格 ${table.table_id}`;
+                tableIdSelect.appendChild(option);
             });
+            
+            // 保存原始URL中的table ID
+            if (urlTableId) {
+                row.dataset.urlTableId = urlTableId;
+                // 检查URL中的table ID是否在返回的列表中
+                const tableExists = result.some(t => t.table_id === urlTableId);
+                if (tableExists) {
+                    // 设置默认选中URL中指定的table
+                    tableIdSelect.value = urlTableId;
+                    console.log('✓ 自动选择URL中指定的表格:', urlTableId);
+                } else {
+                    console.warn('⚠ URL中的table ID不存在于返回的列表中:', urlTableId);
+                }
+            }
+            
+            row.dataset.appToken = appToken;
+            
+            // 检测URL类型
+            const urlType = url.includes('/base/') ? '📄 直接多维表格' : '📖 知识库表格';
+            showVerificationStatus(statusDiv, `✓ 验证成功！类型：${urlType}，找到 ${result.length} 个数据表`, true);
+            tableDetails.style.display = 'block';
+            
         } catch (error) {
-            alert('加载数据表失败: ' + error.message);
+            showVerificationStatus(statusDiv, '验证失败: ' + error.message, false);
+            tableDetails.style.display = 'none';
+        } finally {
+            verifyBtn.disabled = false;
+            verifyBtn.textContent = '验证';
         }
     }
 
-    // 选择数据表后加载字段
-    tableSelect.addEventListener('change', async function() {
-        const tableId = this.value;
-        if (!tableId || !selectedBitable) return;
-
+    // 加载表格字段
+    async function loadTableFields(row) {
+        const appToken = row.dataset.appToken;
+        const tableIdSelect = row.querySelector('.table-id-select');
+        const tableId = tableIdSelect.value;
+        
+        if (!appToken || !tableId) return;
+        
         try {
             const response = await fetch(
-                `http://localhost:8080/api/bitables/fields?app_token=${selectedBitable.app_token}&table_id=${tableId}`
+                `http://localhost:8080/api/bitables/fields?app_token=${appToken}&table_id=${tableId}`
             );
             const fields = await response.json();
-            allFields = fields;
-            displayFields(fields);
-            messageSection.style.display = 'block';
+            
+            displayFieldsInRow(row, fields);
+            
         } catch (error) {
+            console.error('加载字段失败:', error);
             alert('加载字段失败: ' + error.message);
         }
-    });
+    }
 
-    // 显示字段列表
-    function displayFields(fields) {
+    // 在行中显示字段列表
+    function displayFieldsInRow(row, fields) {
+        const writeFieldsList = row.querySelector('.write-fields-list');
+        const checkFieldsList = row.querySelector('.check-fields-list');
+        
         writeFieldsList.innerHTML = '';
         checkFieldsList.innerHTML = '';
-
+        
         fields.forEach(field => {
-            // 待写入字段
             const writeItem = document.createElement('div');
-            writeItem.className = 'checkbox-item';
+            writeItem.style.cssText = 'margin-bottom: 5px;';
             writeItem.innerHTML = `
-                <input type="checkbox" name="write_field" value="${field.field_name}" id="write_${field.field_id}">
-                <label for="write_${field.field_id}">${field.field_name} (${field.field_type})</label>
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" name="write_field" value="${field.field_name}" style="margin-right: 8px;">
+                    <span>${field.field_name} (${field.field_type})</span>
+                </label>
             `;
             writeFieldsList.appendChild(writeItem);
-
-            // 需检测字段
+            
             const checkItem = document.createElement('div');
-            checkItem.className = 'checkbox-item';
+            checkItem.style.cssText = 'margin-bottom: 5px;';
             checkItem.innerHTML = `
-                <input type="checkbox" name="check_field" value="${field.field_name}" id="check_${field.field_id}">
-                <label for="check_${field.field_id}">${field.field_name} (${field.field_type})</label>
+                <label style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" name="check_field" value="${field.field_name}" style="margin-right: 8px;">
+                    <span>${field.field_name} (${field.field_type})</span>
+                </label>
             `;
             checkFieldsList.appendChild(checkItem);
         });
     }
 
+    // 显示验证状态
+    function showVerificationStatus(statusDiv, message, success) {
+        statusDiv.textContent = message;
+        statusDiv.style.display = 'block';
+        statusDiv.style.background = success ? '#d1fae5' : '#fee2e2';
+        statusDiv.style.color = success ? '#065f46' : '#7f1d1d';
+        statusDiv.style.border = success ? '1px solid #10b981' : '1px solid #ef4444';
+    }
+
+    // 添加表格按钮
+    addTableUrlBtn.addEventListener('click', () => {
+        addTableUrlRow();
+    });
+
     // 保存配置
     saveConfigBtn.addEventListener('click', async function() {
-        // 收集选中的字段
-        const writeFields = [];
-        document.querySelectorAll('input[name="write_field"]:checked').forEach(checkbox => {
-            writeFields.push(checkbox.value);
-        });
-
-        const checkFields = [];
-        document.querySelectorAll('input[name="check_field"]:checked').forEach(checkbox => {
-            checkFields.push(checkbox.value);
-        });
-
-        // 验证必填项
-        if (!selectedBitable) {
-            showSaveResult('请选择多维表格', false);
-            return;
-        }
-
-        if (writeFields.length === 0) {
-            showSaveResult('请至少选择一个待写入字段', false);
-            return;
-        }
-
-        // 构建配置
-        const config = {
-            app_id: currentConfigData.app_id,
-            app_secret: currentConfigData.app_secret,
-            table_id: tableSelect.value,
-            app_token: selectedBitable.app_token,
-            table_name: selectedBitable.name,
-            write_fields: writeFields,
-            check_fields: checkFields,
-            group_chat_id: groupChatIdInput.value.trim()
-        };
-
         try {
+            const tables = [];
+            const rows = tableUrlsContainer.querySelectorAll('.table-url-row');
+            
+            if (rows.length === 0) {
+                showSaveResult('请至少添加一个表格', false);
+                return;
+            }
+            
+            for (const row of rows) {
+                const url = row.querySelector('.table-url-input').value.trim();
+                const appToken = row.dataset.appToken;
+                const tableId = row.querySelector('.table-id-select').value;
+                const tableName = row.querySelector('.table-name-input').value.trim();
+                
+                if (!url) {
+                    showSaveResult('请填写所有表格的URL', false);
+                    return;
+                }
+                
+                if (!appToken) {
+                    showSaveResult('请验证所有表格URL', false);
+                    return;
+                }
+                
+                if (!tableId) {
+                    showSaveResult('请为所有表格选择数据表', false);
+                    return;
+                }
+                
+                const writeFields = [];
+                row.querySelectorAll('.write-fields-list input[type="checkbox"]:checked').forEach(cb => {
+                    writeFields.push(cb.value);
+                });
+                
+                if (writeFields.length === 0) {
+                    showSaveResult('每个表格至少需要选择一个待写入字段', false);
+                    return;
+                }
+                
+                const checkFields = [];
+                row.querySelectorAll('.check-fields-list input[type="checkbox"]:checked').forEach(cb => {
+                    checkFields.push(cb.value);
+                });
+                
+                tables.push({
+                    url: url,
+                    app_token: appToken,
+                    table_id: tableId,
+                    name: tableName || `表格 ${tables.length + 1}`,
+                    write_fields: writeFields,
+                    check_fields: checkFields
+                });
+            }
+            
+            const config = {
+                app_id: currentConfigData.app_id,
+                app_secret: currentConfigData.app_secret,
+                tables: tables,
+                group_chat_id: groupChatIdInput.value.trim()
+            };
+            
             saveConfigBtn.disabled = true;
             saveResult.textContent = '保存中...';
-
-            // 保存到Chrome存储
+            
             await chrome.storage.local.set({ larkConfig: config });
-
-            // 同时保存到后端
+            
             const response = await fetch('http://localhost:8080/api/config', {
                 method: 'POST',
                 headers: {
@@ -352,9 +440,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 },
                 body: JSON.stringify(config)
             });
-
+            
             const result = await response.json();
-
+            
             if (response.ok) {
                 showSaveResult('配置保存成功！', true);
                 displayCurrentConfig(config);
@@ -382,22 +470,31 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 显示当前配置
     function displayCurrentConfig(config) {
+        let tablesHtml = '<div style="margin-top: 10px;">';
+        if (config.tables && config.tables.length > 0) {
+            config.tables.forEach((table, index) => {
+                tablesHtml += `
+                    <div style="margin-bottom: 15px; padding: 10px; background: #f3f4f6; border-radius: 6px;">
+                        <strong>表格 ${index + 1}: ${table.name}</strong><br>
+                        <small>数据表ID: ${table.table_id}</small><br>
+                        <small>待写入字段: ${table.write_fields.join(', ')}</small><br>
+                        ${table.check_fields.length > 0 ? `<small>检测字段: ${table.check_fields.join(', ')}</small>` : ''}
+                    </div>
+                `;
+            });
+        } else {
+            tablesHtml += '<p>未配置表格</p>';
+        }
+        tablesHtml += '</div>';
+        
         currentConfig.innerHTML = `
             <div class="config-item">
                 <span class="config-label">应用ID:</span>
                 <span class="config-value">${config.app_id || '未配置'}</span>
             </div>
             <div class="config-item">
-                <span class="config-label">表格:</span>
-                <span class="config-value">${config.table_name || '未配置'} (${config.table_id || ''})</span>
-            </div>
-            <div class="config-item">
-                <span class="config-label">待写入字段:</span>
-                <span class="config-value">${config.write_fields ? config.write_fields.join(', ') : '未配置'}</span>
-            </div>
-            <div class="config-item">
-                <span class="config-label">检测字段:</span>
-                <span class="config-value">${config.check_fields ? config.check_fields.join(', ') : '未配置'}</span>
+                <span class="config-label">配置的表格:</span>
+                <span class="config-value">${tablesHtml}</span>
             </div>
             <div class="config-item">
                 <span class="config-label">群聊ID:</span>
@@ -413,22 +510,24 @@ document.addEventListener('DOMContentLoaded', function() {
             if (result.larkConfig) {
                 const config = result.larkConfig;
                 
-                // 填充表单
                 appIdInput.value = config.app_id || '';
                 appSecretInput.value = config.app_secret || '';
                 groupChatIdInput.value = config.group_chat_id || '';
                 
                 currentConfigData = config;
                 
-                // 显示当前配置
                 displayCurrentConfig(config);
-
-                // 如果已有配置，显示相关区域
+                
                 if (config.app_id && config.app_secret) {
                     bitableSection.style.display = 'block';
-                    if (config.table_name) {
-                        bitableDetails.style.display = 'block';
-                        messageSection.style.display = 'block';
+                    messageSection.style.display = 'block';
+                    
+                    if (config.tables && config.tables.length > 0) {
+                        config.tables.forEach(table => {
+                            addTableUrlRow(table);
+                        });
+                    } else {
+                        addTableUrlRow();
                     }
                 }
             }

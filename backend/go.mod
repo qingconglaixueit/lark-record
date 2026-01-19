@@ -5,7 +5,7 @@ go 1.21
 require (
 	github.com/gin-contrib/cors v1.5.0
 	github.com/gin-gonic/gin v1.9.1
-	github.com/larksuite/oapi-sdk-go/v3 v3.0.15
+	github.com/larksuite/oapi-sdk-go/v3 v3.5.2
 )
 
 require (

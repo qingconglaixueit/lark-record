@@ -158,9 +158,24 @@ func AddRecord(c *gin.Context) {
 	}
 
 	// 检查是否需要发送消息
-	if config.CheckFields != nil && len(config.CheckFields) > 0 && config.GroupChatID != "" {
+	// 支持新的多表格配置和旧的单表格配置
+	var checkFields []string
+	if len(config.Tables) > 0 {
+		// 新格式：从对应的表格配置中获取检测字段
+		for _, table := range config.Tables {
+			if table.AppToken == req.AppToken && table.TableID == req.TableID {
+				checkFields = table.CheckFields
+				break
+			}
+		}
+	} else {
+		// 旧格式：向后兼容
+		checkFields = config.CheckFields
+	}
+
+	if checkFields != nil && len(checkFields) > 0 && config.GroupChatID != "" {
 		go func() {
-			completed, err := larkService.CheckFieldsCompleted(req.AppToken, req.TableID, recordID, config.CheckFields)
+			completed, err := larkService.CheckFieldsCompleted(req.AppToken, req.TableID, recordID, checkFields)
 			if err != nil {
 				fmt.Printf("检查字段状态失败: %v\n", err)
 				return
@@ -203,7 +218,23 @@ func CheckRecordStatus(c *gin.Context) {
 	}
 
 	larkService := services.NewLarkService(config.AppID, config.AppSecret)
-	completed, err := larkService.CheckFieldsCompleted(appToken, tableID, recordID, config.CheckFields)
+	
+	// 支持新的多表格配置和旧的单表格配置
+	var checkFields []string
+	if len(config.Tables) > 0 {
+		// 新格式：从对应的表格配置中获取检测字段
+		for _, table := range config.Tables {
+			if table.AppToken == appToken && table.TableID == tableID {
+				checkFields = table.CheckFields
+				break
+			}
+		}
+	} else {
+		// 旧格式：向后兼容
+		checkFields = config.CheckFields
+	}
+	
+	completed, err := larkService.CheckFieldsCompleted(appToken, tableID, recordID, checkFields)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

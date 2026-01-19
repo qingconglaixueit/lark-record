@@ -2,12 +2,25 @@ package models
 
 // Config 飞书配置
 type Config struct {
-	AppID      string `json:"app_id"`
-	AppSecret  string `json:"app_secret"`
-	TableID    string `json:"table_id"`
+	AppID       string        `json:"app_id"`
+	AppSecret   string        `json:"app_secret"`
+	Tables      []TableConfig `json:"tables"`        // 多个表格配置
+	GroupChatID string        `json:"group_chat_id"` // 消息发送群ID
+
+	// 向后兼容旧版本配置
+	TableID     string   `json:"table_id,omitempty"`
+	WriteFields []string `json:"write_fields,omitempty"`
+	CheckFields []string `json:"check_fields,omitempty"`
+}
+
+// TableConfig 单个表格的配置
+type TableConfig struct {
+	URL         string   `json:"url"`          // 飞书多维表格URL
+	AppToken    string   `json:"app_token"`    // 从URL解析的app_token
+	TableID     string   `json:"table_id"`     // 数据表ID
+	Name        string   `json:"name"`         // 表格名称
 	WriteFields []string `json:"write_fields"` // 待写入的字段
 	CheckFields []string `json:"check_fields"` // 需要检测是否有值的字段
-	GroupChatID string `json:"group_chat_id"`  // 消息发送群ID
 }
 
 // Bitable 飞书多维表格
@@ -15,6 +28,12 @@ type Bitable struct {
 	AppToken string `json:"app_token"`
 	TableID  string `json:"table_id"`
 	Name     string `json:"name"`
+}
+
+// TableInfo 数据表信息
+type TableInfo struct {
+	TableID string `json:"table_id"`
+	Name    string `json:"name"`
 }
 
 // Field 表格字段

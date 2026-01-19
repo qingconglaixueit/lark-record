@@ -16,8 +16,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 全局状态
     let config = null;
-    let selectedBitable = null;
-    let writeFields = [];
+    let selectedTable = null;
 
     // 初始化
     init();
@@ -37,13 +36,14 @@ document.addEventListener('DOMContentLoaded', function() {
             config = result.larkConfig;
             
             // 验证配置是否完整
-            if (!config.app_id || !config.app_secret || !config.table_id) {
+            if (!config.app_id || !config.app_secret || !config.tables || config.tables.length === 0) {
                 showState('notConfigured');
                 return;
             }
 
-            // 加载多维表格列表
-            await loadBitables();
+            // 显示表格选择列表
+            displayTables(config.tables);
+            showState('tableSelection');
             
         } catch (error) {
             console.error('初始化失败:', error);
@@ -76,89 +76,54 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // 加载多维表格列表
-    async function loadBitables() {
-        try {
-            const response = await fetch('http://localhost:8080/api/bitables');
-            
-            if (!response.ok) {
-                throw new Error('获取多维表格失败');
-            }
-
-            const bitables = await response.json();
-            
-            if (bitables.length === 0) {
-                bitableList.innerHTML = '<div class="no-data">未找到多维表格</div>';
-                return;
-            }
-
-            // 显示多维表格列表
-            displayBitables(bitables);
-            showState('tableSelection');
-            
-        } catch (error) {
-            console.error('加载多维表格失败:', error);
-            alert('加载多维表格失败，请确保后端服务已启动: ' + error.message);
-            showState('notConfigured');
-        }
-    }
-
-    // 显示多维表格列表
-    function displayBitables(bitables) {
+    // 显示表格列表
+    function displayTables(tables) {
         bitableList.innerHTML = '';
 
-        bitables.forEach(bitable => {
+        tables.forEach(table => {
             const card = document.createElement('div');
             card.className = 'bitable-card';
+            card.style.cssText = 'padding: 15px; margin-bottom: 10px; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer; transition: all 0.2s;';
             card.innerHTML = `
-                <div class="bitable-icon">📊</div>
-                <div class="bitable-info">
-                    <div class="bitable-name">${bitable.name}</div>
-                    <div class="bitable-id">${bitable.app_token}</div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="font-size: 24px;">📊</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; margin-bottom: 4px;">${table.name}</div>
+                        <div style="font-size: 12px; color: #6b7280;">待写入字段: ${table.write_fields.join(', ')}</div>
+                    </div>
                 </div>
             `;
             
+            card.addEventListener('mouseenter', () => {
+                card.style.background = '#f3f4f6';
+                card.style.borderColor = '#3b82f6';
+            });
+            
+            card.addEventListener('mouseleave', () => {
+                card.style.background = 'white';
+                card.style.borderColor = '#e0e0e0';
+            });
+            
             card.addEventListener('click', () => {
-                selectBitable(bitable);
+                selectTable(table);
             });
             
             bitableList.appendChild(card);
         });
     }
 
-    // 选择多维表格
-    async function selectBitable(bitable) {
+    // 选择表格
+    async function selectTable(table) {
         try {
             loading.style.display = 'block';
             
-            selectedBitable = bitable;
+            selectedTable = table;
             
-            // 获取字段信息
-            const response = await fetch(
-                `http://localhost:8080/api/bitables/fields?app_token=${bitable.app_token}&table_id=${config.table_id}`
-            );
-            
-            if (!response.ok) {
-                throw new Error('获取字段失败');
-            }
-
-            const allFields = await response.json();
-            
-            // 过滤出待写入字段
-            writeFields = allFields.filter(field => 
-                config.write_fields.includes(field.field_name)
-            );
-
-            if (writeFields.length === 0) {
-                alert('当前表格没有配置待写入字段，请在配置页面重新设置');
-                return;
-            }
-
             // 显示输入字段
-            displayInputFields(writeFields);
+            displayInputFields(table.write_fields);
             
             // 更新表格信息
-            tableName.textContent = bitable.name;
+            tableName.textContent = table.name;
             
             // 显示数据输入界面
             showState('dataInput');
@@ -172,23 +137,25 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // 显示输入字段
-    function displayInputFields(fields) {
+    function displayInputFields(writeFields) {
         inputFields.innerHTML = '';
 
-        fields.forEach(field => {
+        writeFields.forEach(fieldName => {
             const fieldDiv = document.createElement('div');
             fieldDiv.className = 'field-group';
+            fieldDiv.style.cssText = 'margin-bottom: 15px;';
             
             const label = document.createElement('label');
-            label.textContent = field.field_name;
-            label.className = 'field-label';
+            label.textContent = fieldName;
+            label.style.cssText = 'display: block; margin-bottom: 5px; font-weight: 500;';
             
             const input = document.createElement('input');
             input.type = 'text';
             input.className = 'field-input';
-            input.placeholder = `请输入${field.field_name}`;
-            input.dataset.fieldName = field.field_name;
+            input.placeholder = `请输入${fieldName}`;
+            input.dataset.fieldName = fieldName;
             input.required = true;
+            input.style.cssText = 'width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;';
 
             fieldDiv.appendChild(label);
             fieldDiv.appendChild(input);
@@ -219,8 +186,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // 构建请求数据
             const requestData = {
-                app_token: selectedBitable.app_token,
-                table_id: config.table_id,
+                app_token: selectedTable.app_token,
+                table_id: selectedTable.table_id,
                 fields: fieldsData
             };
 
@@ -247,11 +214,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 input.value = '';
             });
 
-            // 3秒后返回表格选择界面
+            // 2秒后返回表格选择界面
             setTimeout(() => {
                 showState('tableSelection');
                 submitResult.textContent = '';
-            }, 3000);
+            }, 2000);
 
         } catch (error) {
             console.error('提交记录失败:', error);
@@ -265,32 +232,25 @@ document.addEventListener('DOMContentLoaded', function() {
     // 显示提交结果
     function showSubmitResult(message, success) {
         submitResult.textContent = message;
-        submitResult.className = success ? 'success' : 'error';
-        
-        if (success) {
-            setTimeout(() => {
-                submitResult.textContent = '';
-                submitResult.className = '';
-            }, 3000);
-        }
+        submitResult.style.cssText = `
+            display: inline-block;
+            margin-left: 10px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            ${success ? 'color: #065f46; background: #d1fae5;' : 'color: #7f1d1d; background: #fee2e2;'}
+        `;
     }
 
     // 切换表格
     changeTableBtn.addEventListener('click', function() {
-        selectedBitable = null;
-        writeFields = [];
+        selectedTable = null;
         showState('tableSelection');
+        submitResult.textContent = '';
     });
 
     // 去配置页面
     goToConfigBtn.addEventListener('click', function() {
         chrome.tabs.create({ url: 'options.html' });
-    });
-
-    // 添加输入框的实时验证
-    inputFields.addEventListener('input', function(e) {
-        if (e.target.tagName === 'INPUT') {
-            e.target.classList.toggle('has-value', e.target.value.trim() !== '');
-        }
     });
 });
