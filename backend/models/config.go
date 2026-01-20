@@ -1,5 +1,11 @@
 package models
 
+// WriteField 待写入字段配置
+type WriteField struct {
+	FieldName string `json:"field_name"` // 字段名
+	Default   string `json:"default"`    // 默认值
+}
+
 // Config 飞书配置
 type Config struct {
 	AppID       string        `json:"app_id"`
@@ -8,19 +14,19 @@ type Config struct {
 	GroupChatID string        `json:"group_chat_id"` // 消息发送群ID
 
 	// 向后兼容旧版本配置
-	TableID     string   `json:"table_id,omitempty"`
-	WriteFields []string `json:"write_fields,omitempty"`
-	CheckFields []string `json:"check_fields,omitempty"`
+	TableID     string       `json:"table_id,omitempty"`
+	WriteFields []WriteField `json:"write_fields,omitempty"`
+	CheckFields []string     `json:"check_fields,omitempty"`
 }
 
 // TableConfig 单个表格的配置
 type TableConfig struct {
-	URL         string   `json:"url"`          // 飞书多维表格URL
-	AppToken    string   `json:"app_token"`    // 从URL解析的app_token
-	TableID     string   `json:"table_id"`     // 数据表ID
-	Name        string   `json:"name"`         // 表格名称
-	WriteFields []string `json:"write_fields"` // 待写入的字段
-	CheckFields []string `json:"check_fields"` // 需要检测是否有值的字段
+	URL         string       `json:"url"`          // 飞书多维表格URL
+	AppToken    string       `json:"app_token"`    // 从URL解析的app_token
+	TableID     string       `json:"table_id"`     // 数据表ID
+	Name        string       `json:"name"`         // 表格名称
+	WriteFields []WriteField `json:"write_fields"` // 待写入的字段
+	CheckFields []string     `json:"check_fields"` // 需要检测是否有值的字段
 }
 
 // Bitable 飞书多维表格

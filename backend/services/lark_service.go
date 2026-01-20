@@ -539,7 +539,7 @@ func (s *LarkService) fetchNodeTablesDirectly(nodeToken, accessToken, targetWiki
 				ObjToken  string `json:"obj_token"`
 				ObjType   string `json:"obj_type"`
 				Title     string `json:"title"`
-HasChild  bool   `json:"has_child"`
+				HasChild  bool   `json:"has_child"`
 			} `json:"node"`
 		} `json:"data"`
 	}
@@ -635,7 +635,7 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 
 	// 首先检查 appToken 是否是 wiki token，如果是需要先获取 obj_token
 	realAppToken := appToken
-	
+
 	// 尝试使用 SDK 获取字段，如果失败则可能需要处理 wiki token
 	req := larkbitable.NewListAppTableFieldReqBuilder().
 		AppToken(realAppToken).
@@ -650,7 +650,7 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 	// 如果获取失败，可能是 wiki token，尝试HTTP API直接获取
 	if !resp.Success() {
 		fmt.Println("🔍 SDK获取失败，可能是 Wiki Token，尝试处理...")
-		
+
 		token, err := s.getTenantAccessToken()
 		if err != nil {
 			return nil, fmt.Errorf("获取访问令牌失败: %w", err)
@@ -666,14 +666,14 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 			if nodeErr == nil {
 				defer nodeResp.Body.Close()
 				nodeBody, _ := io.ReadAll(nodeResp.Body)
-				
+
 				type GetNodeResponse struct {
-					Code int    `json:"code"`
+					Code int `json:"code"`
 					Data struct {
 						Node struct {
-							ObjToken  string `json:"obj_token"`
-							ObjType   string `json:"obj_type"`
-							Title     string `json:"title"`
+							ObjToken string `json:"obj_token"`
+							ObjType  string `json:"obj_type"`
+							Title    string `json:"title"`
 						} `json:"node"`
 					} `json:"data"`
 				}
@@ -754,7 +754,7 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 			var fieldName, fieldID string
 			var fieldType int
 			isPrimary := false
-			
+
 			if field.FieldName != nil {
 				fieldName = *field.FieldName
 			}
@@ -774,7 +774,7 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 			})
 		}
 	}
-	
+
 	// 如果SDK获取到了字段，但可能缺少is_primary信息，尝试通过HTTP API获取更详细的字段信息
 	if len(fields) > 0 {
 		fmt.Println("🔍 SDK获取字段成功，尝试通过HTTP API获取更详细的字段信息...")
@@ -815,14 +815,14 @@ func (s *LarkService) getTableFieldsViaHTTP(appToken, tableID string) ([]models.
 		if nodeErr == nil {
 			defer nodeResp.Body.Close()
 			nodeBody, _ := io.ReadAll(nodeResp.Body)
-			
+
 			type GetNodeResponse struct {
-				Code int    `json:"code"`
+				Code int `json:"code"`
 				Data struct {
 					Node struct {
-						ObjToken  string `json:"obj_token"`
-						ObjType   string `json:"obj_type"`
-						Title     string `json:"title"`
+						ObjToken string `json:"obj_token"`
+						ObjType  string `json:"obj_type"`
+						Title    string `json:"title"`
 					} `json:"node"`
 				} `json:"data"`
 			}
@@ -892,7 +892,7 @@ func (s *LarkService) getTableFieldsViaHTTP(appToken, tableID string) ([]models.
 			IsPrimary: isPrimary,
 		})
 	}
-	
+
 	return fields, nil
 }
 
@@ -904,7 +904,7 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 
 	// 首先检查 appToken 是否是 wiki token，如果是需要先获取 obj_token
 	realAppToken := appToken
-	
+
 	// 尝试使用 SDK 添加记录，如果失败则可能需要处理 wiki token
 	record := larkbitable.NewAppTableRecordBuilder().
 		Fields(fields).
@@ -926,7 +926,7 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 
 	// 如果获取失败，可能是 wiki token，尝试HTTP API直接添加记录
 	fmt.Println("🔍 SDK添加记录失败，可能是 Wiki Token，尝试处理...")
-	
+
 	token, err := s.getTenantAccessToken()
 	if err != nil {
 		return "", fmt.Errorf("获取访问令牌失败: %w", err)
@@ -942,7 +942,7 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 		if nodeErr == nil {
 			defer nodeResp.Body.Close()
 			nodeBody, _ := io.ReadAll(nodeResp.Body)
-			
+
 			type GetNodeResponse struct {
 				Code int `json:"code"`
 				Data struct {
@@ -965,11 +965,11 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 
 	// 使用实际的 appToken 添加记录
 	fieldsURL := fmt.Sprintf("https://open.feishu.cn/open-apis/bitable/v1/apps/%s/tables/%s/records?user_id_type=user_id", realAppToken, tableID)
-	
+
 	// 添加调试日志
 	fmt.Printf("📋 准备添加记录 - AppToken: %s, TableID: %s\n", realAppToken, tableID)
 	fmt.Printf("📋 Fields数据: %+v\n", fields)
-	
+
 	// 获取表格字段信息，用于验证
 	fmt.Println("🔍 获取表格字段信息，用于验证...")
 	tableFields, err := s.GetTableFields(realAppToken, tableID)
@@ -980,7 +980,7 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 		for _, field := range tableFields {
 			fmt.Printf("  - 字段名: %s, 类型: %s, ID: %s\n", field.FieldName, field.FieldType, field.FieldID)
 		}
-		
+
 		// 检查必填字段是否都已提供
 		fmt.Println("🔍 检查必填字段是否都已提供...")
 		for _, field := range tableFields {
@@ -995,7 +995,7 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 			}
 		}
 	}
-	
+
 	// 检查字段类型是否匹配
 	fmt.Println("🔍 检查字段类型是否匹配...")
 	for fieldName, fieldValue := range fields {
@@ -1007,7 +1007,7 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 				break
 			}
 		}
-		
+
 		if fieldDef != nil {
 			// 根据字段类型检查值
 			switch fieldDef.FieldType {
@@ -1074,29 +1074,25 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 			fmt.Printf("⚠️ 未找到字段 '%s' 的定义\n", fieldName)
 		}
 	}
-	
+
 	// 确保fields不为空
 	if fields == nil {
-	    fields = make(map[string]interface{})
+		fields = make(map[string]interface{})
 	}
-	
-	// 构建请求体
+
+	// 构建请求体 - 使用单条记录格式
 	reqBody := map[string]interface{}{
-	    "records": []map[string]interface{}{
-	        {
-	            "fields": fields,
-	        },
-	    },
+		"fields": fields,
 	}
-	
+
 	reqBodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
-	    return "", fmt.Errorf("构建请求体失败: %w", err)
+		return "", fmt.Errorf("构建请求体失败: %w", err)
 	}
-	
+
 	// 添加请求体调试日志
 	fmt.Printf("📋 请求体: %s\n", string(reqBodyBytes))
-	
+
 	httpReq, err := http.NewRequest("POST", fieldsURL, bytes.NewReader(reqBodyBytes))
 	if err != nil {
 		return "", fmt.Errorf("创建请求失败: %w", err)
@@ -1116,12 +1112,12 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 	}
 
 	type AddRecordResponse struct {
-		Code int `json:"code"`
+		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			Records []struct {
+			Record struct {
 				RecordID string `json:"record_id"`
-			} `json:"records"`
+			} `json:"record"`
 		} `json:"data"`
 	}
 
@@ -1132,10 +1128,10 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 
 	if addResult.Code != 0 {
 		fmt.Printf("📋 添加记录API响应: %s\n", string(httpBody))
-		
+
 		// 尝试解析更详细的错误信息
 		type ErrorResponse struct {
-			Code int `json:"code"`
+			Code int    `json:"code"`
 			Msg  string `json:"msg"`
 			Data struct {
 				ErrorDetails []struct {
@@ -1144,7 +1140,7 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 				} `json:"error_details,omitempty"`
 			} `json:"data"`
 		}
-		
+
 		var errorResp ErrorResponse
 		if json.Unmarshal(httpBody, &errorResp) == nil {
 			if len(errorResp.Data.ErrorDetails) > 0 {
@@ -1155,12 +1151,12 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 				return "", fmt.Errorf("新增记录失败: %s (Code: %d). 详细错误: %s", addResult.Msg, addResult.Code, errorDetails)
 			}
 		}
-		
+
 		return "", fmt.Errorf("新增记录失败: %s (Code: %d)", addResult.Msg, addResult.Code)
 	}
 
-	if len(addResult.Data.Records) > 0 {
-		return addResult.Data.Records[0].RecordID, nil
+	if addResult.Data.Record.RecordID != "" {
+		return addResult.Data.Record.RecordID, nil
 	}
 
 	return "", fmt.Errorf("新增记录失败: 未获取到记录ID")
@@ -1174,7 +1170,7 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 
 	// 首先检查 appToken 是否是 wiki token，如果是需要先获取 obj_token
 	realAppToken := appToken
-	
+
 	// 尝试使用 SDK 获取记录，如果失败则可能需要处理 wiki token
 	req := larkbitable.NewGetAppTableRecordReqBuilder().
 		AppToken(realAppToken).
@@ -1202,7 +1198,7 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 
 	// 如果获取失败，可能是 wiki token，尝试HTTP API直接获取记录
 	fmt.Println("🔍 SDK获取记录失败，可能是 Wiki Token，尝试处理...")
-	
+
 	token, err := s.getTenantAccessToken()
 	if err != nil {
 		return false, fmt.Errorf("获取访问令牌失败: %w", err)
@@ -1218,7 +1214,7 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 		if nodeErr == nil {
 			defer nodeResp.Body.Close()
 			nodeBody, _ := io.ReadAll(nodeResp.Body)
-			
+
 			type GetNodeResponse struct {
 				Code int `json:"code"`
 				Data struct {
@@ -1241,7 +1237,7 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 
 	// 使用实际的 appToken 获取记录
 	recordURL := fmt.Sprintf("https://open.feishu.cn/open-apis/bitable/v1/apps/%s/tables/%s/records/%s?user_id_type=user_id", realAppToken, tableID, recordID)
-	
+
 	httpReq, err := http.NewRequest("GET", recordURL, nil)
 	if err != nil {
 		return false, fmt.Errorf("创建请求失败: %w", err)
@@ -1261,7 +1257,7 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 	}
 
 	type GetRecordResponse struct {
-		Code int `json:"code"`
+		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
 			Record struct {
