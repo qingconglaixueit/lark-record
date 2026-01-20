@@ -252,15 +252,16 @@ func (s *LarkService) GetBitableTables(appToken string) ([]models.TableInfo, err
 }
 
 // fetchWikiTablesDirectly 直接通过HTTP API获取Wiki节点关联的数据表
-func (s *LarkService) fetchWikiTablesDirectly(wikiNodeToken string) ([]models.TableInfo, error) {
+func (s *LarkService) fetchWikiTablesDirectly(wikiToken string) ([]models.TableInfo, error) {
 	token, err := s.getTenantAccessToken()
 	if err != nil {
 		return nil, fmt.Errorf("获取访问令牌失败: %w", err)
 	}
 
-	// 首先尝试直接获取Wiki节点信息
-	nodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/nodes/%s?user_id_type=user_id", wikiNodeToken)
-	nodeReq, err := http.NewRequest("GET", nodeURL, nil)
+	// 第一步：通过 wiki token 获取节点信息（获取 obj_token）
+	// 使用正确的接口: https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node
+	getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", wikiToken)
+	nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建节点请求失败: %w", err)
 	}
@@ -279,7 +280,7 @@ func (s *LarkService) fetchWikiTablesDirectly(wikiNodeToken string) ([]models.Ta
 
 	fmt.Printf("📋 获取到Wiki节点响应: %s\n", string(nodeBody))
 
-	type NodeResponse struct {
+	type GetNodeResponse struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
@@ -293,46 +294,27 @@ func (s *LarkService) fetchWikiTablesDirectly(wikiNodeToken string) ([]models.Ta
 		} `json:"data"`
 	}
 
-	var nodeResult NodeResponse
-
-	// 检查响应是否成功
-	if nodeResp.StatusCode != 200 {
-		// HTTP状态码非200，尝试解析JSON格式的错误响应
-		if err := json.Unmarshal(nodeBody, &nodeResult); err == nil {
-			fmt.Printf("⚠️  获取节点信息失败: %s (Code: %d, HTTP: %d)\n", nodeResult.Msg, nodeResult.Code, nodeResp.StatusCode)
-		} else {
-			fmt.Printf("⚠️  获取节点信息失败: HTTP %d, 响应无法解析\n", nodeResp.StatusCode)
-		}
-		// 降级到将wikiNodeToken视为空间ID，尝试获取空间内的节点列表
-		fmt.Printf("🔍 尝试将Token作为Wiki空间ID获取节点列表...\n")
-		return s.fetchWikiSpaceTables(wikiNodeToken, token)
-	}
+	var nodeResult GetNodeResponse
 
 	if err := json.Unmarshal(nodeBody, &nodeResult); err != nil {
 		return nil, fmt.Errorf("解析节点信息失败: %w", err)
 	}
 
 	if nodeResult.Code != 0 {
-		fmt.Printf("⚠️  获取节点信息失败: %s (Code: %d)，尝试从Wiki空间搜索所有bitable\n", nodeResult.Msg, nodeResult.Code)
-		return s.searchAllBitablesInWiki(token)
+		return nil, fmt.Errorf("获取节点信息失败: %s (Code: %d)", nodeResult.Msg, nodeResult.Code)
 	}
 
 	node := nodeResult.Data.Node
-	spaceID := node.SpaceID
-	if spaceID == "" {
-		spaceID = "7102436789893267458"
-	}
-	fmt.Printf("✅ 获取到节点: 标题=%s, ObjType=%s, ObjToken=%s, SpaceID=%s\n", node.Title, node.ObjType, node.ObjToken, spaceID)
+	fmt.Printf("✅ 获取到节点: 标题=%s, ObjType=%s, ObjToken=%s, SpaceID=%s\n", node.Title, node.ObjType, node.ObjToken, node.SpaceID)
 
-	// 如果节点本身是bitable，直接获取其数据表
+	// 第二步：如果节点本身是bitable，使用 obj_token 作为 app_token 获取数据表
 	if node.ObjType == "bitable" && node.ObjToken != "" {
 		return s.fetchBitableTables(node.ObjToken, node.Title, token)
 	}
 
 	// 如果节点不是bitable，尝试搜索子节点
 	fmt.Printf("🔍 节点类型为 %s，尝试搜索子节点...\n", node.ObjType)
-	// 使用当前节点作为根节点，搜索子节点中的bitable
-	tables, err := s.searchChildrenForTables(node.NodeToken, node.Title, token, wikiNodeToken)
+	tables, err := s.searchChildrenForTables(node.NodeToken, node.Title, token, wikiToken, node.SpaceID)
 	if err != nil {
 		fmt.Printf("⚠️ 搜索子节点失败: %v\n", err)
 		return []models.TableInfo{}, nil
@@ -340,9 +322,8 @@ func (s *LarkService) fetchWikiTablesDirectly(wikiNodeToken string) ([]models.Ta
 	if len(tables) > 0 {
 		return tables, nil
 	}
-	// 如果子节点中没有找到，尝试从Wiki空间搜索所有bitable
-	fmt.Printf("🔍 子节点中未找到bitable，尝试从Wiki空间搜索所有bitable节点...\n")
-	return s.fetchWikiSpaceTables(wikiNodeToken, token)
+
+	return []models.TableInfo{}, fmt.Errorf("未找到多维表格数据表")
 }
 
 // searchAllBitablesInWiki 从Wiki空间搜索所有bitable节点
@@ -397,7 +378,7 @@ func (s *LarkService) fetchWikiSpaceTables(wikiToken, accessToken string) ([]mod
 	for _, node := range nodesResult.Data.Items {
 		if node.HasChild {
 			fmt.Printf("🔍 根节点 '%s' 有子节点，开始递归搜索...\n", node.Title)
-			tables, err := s.searchChildrenForTables(node.NodeToken, node.Title, accessToken, wikiToken)
+			tables, err := s.searchChildrenForTables(node.NodeToken, node.Title, accessToken, wikiToken, wikiSpaceID)
 			if err != nil {
 				fmt.Printf("⚠️  搜索节点 '%s' 失败: %v\n", node.Title, err)
 				continue
@@ -436,7 +417,9 @@ func (s *LarkService) searchNodeForTables(nodeToken, nodeTitle, accessToken stri
 	// 如果匹配目标Wiki Token，优先处理
 	if nodeToken == targetWikiToken {
 		// 获取子节点（使用children API）
-		return s.searchChildrenForTables(nodeToken, nodeTitle, accessToken, targetWikiToken)
+		// 由于这里无法获取到正确的 space_id，返回空列表
+		fmt.Printf("⚠️ searchNodeForTables 中无法获取 space_id，跳过处理")
+		return []models.TableInfo{}, nil
 	}
 
 	// 直接从 WikiNodesResponse 结构中访问节点信息，避免重复API调用
@@ -447,12 +430,11 @@ func (s *LarkService) searchNodeForTables(nodeToken, nodeTitle, accessToken stri
 }
 
 // searchChildrenForTables 获取节点的子节点并搜索其中的bitable数据表
-func (s *LarkService) searchChildrenForTables(nodeToken, nodeTitle, accessToken, targetWikiToken string) ([]models.TableInfo, error) {
+func (s *LarkService) searchChildrenForTables(nodeToken, nodeTitle, accessToken, targetWikiToken, spaceID string) ([]models.TableInfo, error) {
 	var allTables []models.TableInfo
-	wikiSpaceID := "7102436789893267458"
 
 	// 获取子节点列表（使用正确的API，根据飞书开放文档）
-	childrenURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/%s/nodes?page_size=50&parent_node_token=%s", wikiSpaceID, nodeToken)
+	childrenURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/%s/nodes?page_size=50&parent_node_token=%s", spaceID, nodeToken)
 	childrenReq, err := http.NewRequest("GET", childrenURL, nil)
 	if err != nil {
 		return allTables, fmt.Errorf("创建子节点列表请求失败: %w", err)
@@ -650,9 +632,12 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 
 	ctx := context.Background()
 
-	// 首先尝试直接使用appToken
+	// 首先检查 appToken 是否是 wiki token，如果是需要先获取 obj_token
+	realAppToken := appToken
+	
+	// 尝试使用 SDK 获取字段，如果失败则可能需要处理 wiki token
 	req := larkbitable.NewListAppTableFieldReqBuilder().
-		AppToken(appToken).
+		AppToken(realAppToken).
 		TableId(tableID).
 		Build()
 
@@ -661,88 +646,97 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 		return nil, fmt.Errorf("获取字段列表失败: %v", err)
 	}
 
-	// 如果获取失败，可能是wiki token，尝试HTTP API直接获取
+	// 如果获取失败，可能是 wiki token，尝试HTTP API直接获取
 	if !resp.Success() {
-		if resp.Code == 91402 || resp.Code == 99991663 {
-			fmt.Println("🔍 检测到Wiki Token，尝试通过HTTP API获取字段...")
+		fmt.Println("🔍 SDK获取失败，可能是 Wiki Token，尝试处理...")
+		
+		token, err := s.getTenantAccessToken()
+		if err != nil {
+			return nil, fmt.Errorf("获取访问令牌失败: %w", err)
+		}
 
-			token, err := s.getTenantAccessToken()
-			if err != nil {
-				return nil, fmt.Errorf("获取访问令牌失败: %w", err)
-			}
-
-			wikiSpaceID := "7102436789893267458"
-			nodesURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/%s/nodes?page_size=50", wikiSpaceID)
-			nodesReq, _ := http.NewRequest("GET", nodesURL, nil)
-			nodesReq.Header.Set("Authorization", "Bearer "+token)
-
-			nodesResp, err := s.httpClient.Do(nodesReq)
-			if err != nil {
-				return nil, fmt.Errorf("获取Wiki节点失败: %v", err)
-			}
-			defer nodesResp.Body.Close()
-
-			nodesBody, _ := io.ReadAll(nodesResp.Body)
-
-			var nodesResult WikiNodesResponse
-			json.Unmarshal(nodesBody, &nodesResult)
-
-			if nodesResult.Code != 0 {
-				return nil, fmt.Errorf("获取Wiki节点列表失败: %s (Code: %d)", nodesResult.Msg, nodesResult.Code)
-			}
-
-			// 查找对应的bitable
-			for _, node := range nodesResult.Data.Items {
-				if node.ObjType == "bitable" {
-					// 获取这个bitable的字段
-					fieldsURL := fmt.Sprintf("https://open.feishu.cn/open-apis/bitable/v1/apps/%s/tables/%s/fields", node.ObjToken, tableID)
-					fieldsReq, err := http.NewRequest("GET", fieldsURL, nil)
-					if err != nil {
-						continue
-					}
-					fieldsReq.Header.Set("Authorization", "Bearer "+token)
-
-					fieldsResp, err := s.httpClient.Do(fieldsReq)
-					if err != nil {
-						continue
-					}
-					defer fieldsResp.Body.Close()
-
-					fieldsBody, _ := io.ReadAll(fieldsResp.Body)
-
-					type FieldsResponse struct {
-						Code int `json:"code"`
-						Data struct {
-							Items []struct {
-								FieldName string `json:"field_name"`
-								Type      int    `json:"type"`
-								FieldId   string `json:"field_id"`
-							} `json:"items"`
-						} `json:"data"`
-					}
-
-					var fieldsResult FieldsResponse
-					json.Unmarshal(fieldsBody, &fieldsResult)
-
-					if fieldsResult.Code == 0 {
-						var fields []models.Field
-						for _, field := range fieldsResult.Data.Items {
-							fields = append(fields, models.Field{
-								FieldName: field.FieldName,
-								FieldType: fmt.Sprintf("%d", field.Type),
-								FieldID:   field.FieldId,
-							})
-						}
-						fmt.Printf("✅ 成功获取到字段: %d 个\n", len(fields))
-						return fields, nil
+		// 尝试判断是否为 wiki token：如果以 "BEsNwa" 等开头，很可能是 wiki token
+		// 或者尝试调用 wiki API 检查
+		getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
+		nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
+		if err == nil {
+			nodeReq.Header.Set("Authorization", "Bearer "+token)
+			nodeResp, nodeErr := s.httpClient.Do(nodeReq)
+			if nodeErr == nil {
+				defer nodeResp.Body.Close()
+				nodeBody, _ := io.ReadAll(nodeResp.Body)
+				
+				type GetNodeResponse struct {
+					Code int    `json:"code"`
+					Data struct {
+						Node struct {
+							ObjToken  string `json:"obj_token"`
+							ObjType   string `json:"obj_type"`
+							Title     string `json:"title"`
+						} `json:"node"`
+					} `json:"data"`
+				}
+				var nodeResult GetNodeResponse
+				if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
+					if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
+						fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
+						realAppToken = nodeResult.Data.Node.ObjToken
 					}
 				}
 			}
-
-			return nil, fmt.Errorf("在Wiki空间中未找到该字段的多维表格节点")
 		}
 
-		return nil, fmt.Errorf("获取字段列表失败: %s (Code: %d)", resp.Msg, resp.Code)
+		// 使用实际的 appToken 获取字段
+		fieldsURL := fmt.Sprintf("https://open.feishu.cn/open-apis/bitable/v1/apps/%s/tables/%s/fields?user_id_type=user_id", realAppToken, tableID)
+		fieldsReq, err := http.NewRequest("GET", fieldsURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("创建字段请求失败: %w", err)
+		}
+		fieldsReq.Header.Set("Authorization", "Bearer "+token)
+
+		fieldsResp, err := s.httpClient.Do(fieldsReq)
+		if err != nil {
+			return nil, fmt.Errorf("获取字段列表失败: %w", err)
+		}
+		defer fieldsResp.Body.Close()
+
+		fieldsBody, err := io.ReadAll(fieldsResp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("读取字段响应失败: %w", err)
+		}
+
+		type FieldsResponse struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+			Data struct {
+				Items []struct {
+					FieldName string `json:"field_name"`
+					Type      int    `json:"type"`
+					FieldId   string `json:"field_id"`
+				} `json:"items"`
+			} `json:"data"`
+		}
+
+		var fieldsResult FieldsResponse
+		if err := json.Unmarshal(fieldsBody, &fieldsResult); err != nil {
+			return nil, fmt.Errorf("解析字段响应失败: %w", err)
+		}
+
+		if fieldsResult.Code != 0 {
+			fmt.Printf("📋 字段API响应: %s\n", string(fieldsBody))
+			return nil, fmt.Errorf("获取字段列表失败: %s (Code: %d)", fieldsResult.Msg, fieldsResult.Code)
+		}
+
+		var fields []models.Field
+		for _, field := range fieldsResult.Data.Items {
+			fields = append(fields, models.Field{
+				FieldName: field.FieldName,
+				FieldType: fmt.Sprintf("%d", field.Type),
+				FieldID:   field.FieldId,
+			})
+		}
+		fmt.Printf("✅ 成功获取到字段: %d 个\n", len(fields))
+		return fields, nil
 	}
 
 	var fields []models.Field
