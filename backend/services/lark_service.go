@@ -8,6 +8,7 @@ import (
 	"io"
 	"lark-record/models"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -538,7 +539,7 @@ func (s *LarkService) fetchNodeTablesDirectly(nodeToken, accessToken, targetWiki
 				ObjToken  string `json:"obj_token"`
 				ObjType   string `json:"obj_type"`
 				Title     string `json:"title"`
-				HasChild  bool   `json:"has_child"`
+HasChild  bool   `json:"has_child"`
 			} `json:"node"`
 		} `json:"data"`
 	}
@@ -713,6 +714,9 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 					FieldName string `json:"field_name"`
 					Type      int    `json:"type"`
 					FieldId   string `json:"field_id"`
+					Property  *struct {
+						IsPrimary *bool `json:"is_primary"`
+					} `json:"property,omitempty"`
 				} `json:"items"`
 			} `json:"data"`
 		}
@@ -729,10 +733,15 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 
 		var fields []models.Field
 		for _, field := range fieldsResult.Data.Items {
+			isPrimary := false
+			if field.Property != nil && field.Property.IsPrimary != nil {
+				isPrimary = *field.Property.IsPrimary
+			}
 			fields = append(fields, models.Field{
 				FieldName: field.FieldName,
 				FieldType: fmt.Sprintf("%d", field.Type),
 				FieldID:   field.FieldId,
+				IsPrimary: isPrimary,
 			})
 		}
 		fmt.Printf("✅ 成功获取到字段: %d 个\n", len(fields))
@@ -744,6 +753,8 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 		for _, field := range resp.Data.Items {
 			var fieldName, fieldID string
 			var fieldType int
+			isPrimary := false
+			
 			if field.FieldName != nil {
 				fieldName = *field.FieldName
 			}
@@ -753,14 +764,135 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 			if field.FieldId != nil {
 				fieldID = *field.FieldId
 			}
+			// SDK可能不提供is_primary信息，先使用SDK获取基本信息
+			// 然后通过HTTP API获取更详细的字段信息
 			fields = append(fields, models.Field{
 				FieldName: fieldName,
 				FieldType: fmt.Sprintf("%d", fieldType),
 				FieldID:   fieldID,
+				IsPrimary: isPrimary,
 			})
 		}
 	}
+	
+	// 如果SDK获取到了字段，但可能缺少is_primary信息，尝试通过HTTP API获取更详细的字段信息
+	if len(fields) > 0 {
+		fmt.Println("🔍 SDK获取字段成功，尝试通过HTTP API获取更详细的字段信息...")
+		detailedFields, err := s.getTableFieldsViaHTTP(appToken, tableID)
+		if err != nil {
+			fmt.Printf("⚠️ 通过HTTP API获取详细字段信息失败: %v，使用SDK获取的字段信息\n", err)
+		} else {
+			// 合并SDK和HTTP API获取的字段信息，以SDK的字段顺序为准，补充is_primary信息
+			for i, sdkField := range fields {
+				for _, httpField := range detailedFields {
+					if sdkField.FieldID == httpField.FieldID {
+						fields[i].IsPrimary = httpField.IsPrimary
+						break
+					}
+				}
+			}
+		}
+	}
 
+	return fields, nil
+}
+
+// getTableFieldsViaHTTP 通过HTTP API获取数据表的所有字段
+func (s *LarkService) getTableFieldsViaHTTP(appToken, tableID string) ([]models.Field, error) {
+	// 获取访问令牌
+	token, err := s.getTenantAccessToken()
+	if err != nil {
+		return nil, fmt.Errorf("获取访问令牌失败: %w", err)
+	}
+
+	// 检查是否为 wiki token
+	realAppToken := appToken
+	getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
+	nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
+	if err == nil {
+		nodeReq.Header.Set("Authorization", "Bearer "+token)
+		nodeResp, nodeErr := s.httpClient.Do(nodeReq)
+		if nodeErr == nil {
+			defer nodeResp.Body.Close()
+			nodeBody, _ := io.ReadAll(nodeResp.Body)
+			
+			type GetNodeResponse struct {
+				Code int    `json:"code"`
+				Data struct {
+					Node struct {
+						ObjToken  string `json:"obj_token"`
+						ObjType   string `json:"obj_type"`
+						Title     string `json:"title"`
+					} `json:"node"`
+				} `json:"data"`
+			}
+			var nodeResult GetNodeResponse
+			if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
+				if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
+					fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
+					realAppToken = nodeResult.Data.Node.ObjToken
+				}
+			}
+		}
+	}
+
+	// 使用实际的 appToken 获取字段
+	fieldsURL := fmt.Sprintf("https://open.feishu.cn/open-apis/bitable/v1/apps/%s/tables/%s/fields?user_id_type=user_id", realAppToken, tableID)
+	fieldsReq, err := http.NewRequest("GET", fieldsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建字段请求失败: %w", err)
+	}
+	fieldsReq.Header.Set("Authorization", "Bearer "+token)
+
+	fieldsResp, err := s.httpClient.Do(fieldsReq)
+	if err != nil {
+		return nil, fmt.Errorf("获取字段列表失败: %w", err)
+	}
+	defer fieldsResp.Body.Close()
+
+	fieldsBody, err := io.ReadAll(fieldsResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取字段响应失败: %w", err)
+	}
+
+	type FieldsResponse struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			Items []struct {
+				FieldName string `json:"field_name"`
+				Type      int    `json:"type"`
+				FieldId   string `json:"field_id"`
+				Property  *struct {
+					IsPrimary *bool `json:"is_primary"`
+				} `json:"property,omitempty"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+
+	var fieldsResult FieldsResponse
+	if err := json.Unmarshal(fieldsBody, &fieldsResult); err != nil {
+		return nil, fmt.Errorf("解析字段响应失败: %w", err)
+	}
+
+	if fieldsResult.Code != 0 {
+		return nil, fmt.Errorf("获取字段列表失败: %s (Code: %d)", fieldsResult.Msg, fieldsResult.Code)
+	}
+
+	var fields []models.Field
+	for _, field := range fieldsResult.Data.Items {
+		isPrimary := false
+		if field.Property != nil && field.Property.IsPrimary != nil {
+			isPrimary = *field.Property.IsPrimary
+		}
+		fields = append(fields, models.Field{
+			FieldName: field.FieldName,
+			FieldType: fmt.Sprintf("%d", field.Type),
+			FieldID:   field.FieldId,
+			IsPrimary: isPrimary,
+		})
+	}
+	
 	return fields, nil
 }
 
@@ -770,28 +902,265 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 
 	ctx := context.Background()
 
-	// 构建记录数据
+	// 首先检查 appToken 是否是 wiki token，如果是需要先获取 obj_token
+	realAppToken := appToken
+	
+	// 尝试使用 SDK 添加记录，如果失败则可能需要处理 wiki token
 	record := larkbitable.NewAppTableRecordBuilder().
 		Fields(fields).
 		Build()
 
 	req := larkbitable.NewCreateAppTableRecordReqBuilder().
-		AppToken(appToken).
+		AppToken(realAppToken).
 		TableId(tableID).
 		AppTableRecord(record).
 		Build()
 
 	resp, err := s.client.Bitable.AppTableRecord.Create(ctx, req)
+	if err == nil && resp.Success() {
+		if resp.Data != nil && resp.Data.Record != nil && resp.Data.Record.RecordId != nil {
+			return *resp.Data.Record.RecordId, nil
+		}
+		return "", fmt.Errorf("新增记录失败: 未获取到记录ID")
+	}
+
+	// 如果获取失败，可能是 wiki token，尝试HTTP API直接添加记录
+	fmt.Println("🔍 SDK添加记录失败，可能是 Wiki Token，尝试处理...")
+	
+	token, err := s.getTenantAccessToken()
 	if err != nil {
-		return "", fmt.Errorf("新增记录失败: %v", err)
+		return "", fmt.Errorf("获取访问令牌失败: %w", err)
 	}
 
-	if !resp.Success() {
-		return "", fmt.Errorf("新增记录失败: %s", resp.Msg)
+	// 尝试判断是否为 wiki token：如果以 "BEsNwa" 等开头，很可能是 wiki token
+	// 或者尝试调用 wiki API 检查
+	getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
+	nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
+	if err == nil {
+		nodeReq.Header.Set("Authorization", "Bearer "+token)
+		nodeResp, nodeErr := s.httpClient.Do(nodeReq)
+		if nodeErr == nil {
+			defer nodeResp.Body.Close()
+			nodeBody, _ := io.ReadAll(nodeResp.Body)
+			
+			type GetNodeResponse struct {
+				Code int `json:"code"`
+				Data struct {
+					Node struct {
+						ObjToken string `json:"obj_token"`
+						ObjType  string `json:"obj_type"`
+						Title    string `json:"title"`
+					} `json:"node"`
+				} `json:"data"`
+			}
+			var nodeResult GetNodeResponse
+			if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
+				if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
+					fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
+					realAppToken = nodeResult.Data.Node.ObjToken
+				}
+			}
+		}
 	}
 
-	if resp.Data != nil && resp.Data.Record != nil && resp.Data.Record.RecordId != nil {
-		return *resp.Data.Record.RecordId, nil
+	// 使用实际的 appToken 添加记录
+	fieldsURL := fmt.Sprintf("https://open.feishu.cn/open-apis/bitable/v1/apps/%s/tables/%s/records?user_id_type=user_id", realAppToken, tableID)
+	
+	// 添加调试日志
+	fmt.Printf("📋 准备添加记录 - AppToken: %s, TableID: %s\n", realAppToken, tableID)
+	fmt.Printf("📋 Fields数据: %+v\n", fields)
+	
+	// 获取表格字段信息，用于验证
+	fmt.Println("🔍 获取表格字段信息，用于验证...")
+	tableFields, err := s.GetTableFields(realAppToken, tableID)
+	if err != nil {
+		fmt.Printf("⚠️ 获取表格字段失败: %v\n", err)
+	} else {
+		fmt.Printf("✅ 表格字段信息: %d 个字段\n", len(tableFields))
+		for _, field := range tableFields {
+			fmt.Printf("  - 字段名: %s, 类型: %s, ID: %s\n", field.FieldName, field.FieldType, field.FieldID)
+		}
+		
+		// 检查必填字段是否都已提供
+		fmt.Println("🔍 检查必填字段是否都已提供...")
+		for _, field := range tableFields {
+			// 检查是否为必填字段（通常字段ID以 "opt" 开头的是可选字段，其他可能是必填）
+			isRequired := !strings.HasPrefix(field.FieldID, "opt")
+			if isRequired {
+				if _, exists := fields[field.FieldName]; !exists {
+					fmt.Printf("⚠️ 必填字段缺失: %s (ID: %s)\n", field.FieldName, field.FieldID)
+				} else {
+					fmt.Printf("✅ 必填字段已提供: %s\n", field.FieldName)
+				}
+			}
+		}
+	}
+	
+	// 检查字段类型是否匹配
+	fmt.Println("🔍 检查字段类型是否匹配...")
+	for fieldName, fieldValue := range fields {
+		// 查找对应的字段定义
+		var fieldDef *models.Field
+		for _, field := range tableFields {
+			if field.FieldName == fieldName {
+				fieldDef = &field
+				break
+			}
+		}
+		
+		if fieldDef != nil {
+			// 根据字段类型检查值
+			switch fieldDef.FieldType {
+			case "1": // 文本
+				if fieldValue != nil && fmt.Sprintf("%v", fieldValue) == "" {
+					fmt.Printf("⚠️ 文本字段 '%s' 的值为空\n", fieldName)
+				}
+			case "2": // 数字
+				if _, ok := fieldValue.(float64); !ok && fieldValue != nil {
+					fmt.Printf("⚠️ 数字字段 '%s' 的值类型不匹配，期望数字，实际: %T\n", fieldName, fieldValue)
+				}
+			case "3": // 单选
+				if fieldValue == nil || fmt.Sprintf("%v", fieldValue) == "" {
+					fmt.Printf("⚠️ 单选字段 '%s' 的值为空\n", fieldName)
+				}
+			case "4": // 多选
+				if _, ok := fieldValue.([]interface{}); !ok && fieldValue != nil {
+					fmt.Printf("⚠️ 多选字段 '%s' 的值类型不匹配，期望数组，实际: %T\n", fieldName, fieldValue)
+				}
+			case "5": // 日期
+				if _, ok := fieldValue.(int64); !ok && fieldValue != nil {
+					fmt.Printf("⚠️ 日期字段 '%s' 的值类型不匹配，期望时间戳，实际: %T\n", fieldName, fieldValue)
+				}
+			case "11": // 人员
+				if _, ok := fieldValue.([]interface{}); !ok && fieldValue != nil {
+					fmt.Printf("⚠️ 人员字段 '%s' 的值类型不匹配，期望数组，实际: %T\n", fieldName, fieldValue)
+				}
+			case "13": // 附件
+				if _, ok := fieldValue.([]interface{}); !ok && fieldValue != nil {
+					fmt.Printf("⚠️ 附件字段 '%s' 的值类型不匹配，期望数组，实际: %T\n", fieldName, fieldValue)
+				}
+			case "15": // 复选框
+				if _, ok := fieldValue.(bool); !ok && fieldValue != nil {
+					fmt.Printf("⚠️ 复选框字段 '%s' 的值类型不匹配，期望布尔值，实际: %T\n", fieldName, fieldValue)
+				}
+			case "17": // URL
+				if fieldValue != nil && fmt.Sprintf("%v", fieldValue) == "" {
+					fmt.Printf("⚠️ URL字段 '%s' 的值为空\n", fieldName)
+				}
+			case "18": // 邮箱
+				if fieldValue != nil && fmt.Sprintf("%v", fieldValue) == "" {
+					fmt.Printf("⚠️ 邮箱字段 '%s' 的值为空\n", fieldName)
+				}
+			case "19": // 电话
+				if fieldValue != nil && fmt.Sprintf("%v", fieldValue) == "" {
+					fmt.Printf("⚠️ 电话字段 '%s' 的值为空\n", fieldName)
+				}
+			case "20": // 进度
+				if _, ok := fieldValue.(float64); !ok && fieldValue != nil {
+					fmt.Printf("⚠️ 进度字段 '%s' 的值类型不匹配，期望数字，实际: %T\n", fieldName, fieldValue)
+				}
+			case "21": // 评分
+				if _, ok := fieldValue.(float64); !ok && fieldValue != nil {
+					fmt.Printf("⚠️ 评分字段 '%s' 的值类型不匹配，期望数字，实际: %T\n", fieldName, fieldValue)
+				}
+			case "23": // 货币
+				if _, ok := fieldValue.(float64); !ok && fieldValue != nil {
+					fmt.Printf("⚠️ 货币字段 '%s' 的值类型不匹配，期望数字，实际: %T\n", fieldName, fieldValue)
+				}
+			default:
+				fmt.Printf("⚠️ 未知字段类型 '%s' 的字段 '%s'\n", fieldDef.FieldType, fieldName)
+			}
+		} else {
+			fmt.Printf("⚠️ 未找到字段 '%s' 的定义\n", fieldName)
+		}
+	}
+	
+	// 确保fields不为空
+	if fields == nil {
+	    fields = make(map[string]interface{})
+	}
+	
+	// 构建请求体
+	reqBody := map[string]interface{}{
+	    "records": []map[string]interface{}{
+	        {
+	            "fields": fields,
+	        },
+	    },
+	}
+	
+	reqBodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+	    return "", fmt.Errorf("构建请求体失败: %w", err)
+	}
+	
+	// 添加请求体调试日志
+	fmt.Printf("📋 请求体: %s\n", string(reqBodyBytes))
+	
+	httpReq, err := http.NewRequest("POST", fieldsURL, bytes.NewReader(reqBodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	httpResp, err := s.httpClient.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("添加记录失败: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	httpBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	type AddRecordResponse struct {
+		Code int `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			Records []struct {
+				RecordID string `json:"record_id"`
+			} `json:"records"`
+		} `json:"data"`
+	}
+
+	var addResult AddRecordResponse
+	if err := json.Unmarshal(httpBody, &addResult); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if addResult.Code != 0 {
+		fmt.Printf("📋 添加记录API响应: %s\n", string(httpBody))
+		
+		// 尝试解析更详细的错误信息
+		type ErrorResponse struct {
+			Code int `json:"code"`
+			Msg  string `json:"msg"`
+			Data struct {
+				ErrorDetails []struct {
+					Field   string `json:"field"`
+					Message string `json:"message"`
+				} `json:"error_details,omitempty"`
+			} `json:"data"`
+		}
+		
+		var errorResp ErrorResponse
+		if json.Unmarshal(httpBody, &errorResp) == nil {
+			if len(errorResp.Data.ErrorDetails) > 0 {
+				errorDetails := ""
+				for _, detail := range errorResp.Data.ErrorDetails {
+					errorDetails += fmt.Sprintf("字段 '%s': %s; ", detail.Field, detail.Message)
+				}
+				return "", fmt.Errorf("新增记录失败: %s (Code: %d). 详细错误: %s", addResult.Msg, addResult.Code, errorDetails)
+			}
+		}
+		
+		return "", fmt.Errorf("新增记录失败: %s (Code: %d)", addResult.Msg, addResult.Code)
+	}
+
+	if len(addResult.Data.Records) > 0 {
+		return addResult.Data.Records[0].RecordID, nil
 	}
 
 	return "", fmt.Errorf("新增记录失败: 未获取到记录ID")
@@ -803,29 +1172,117 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 
 	ctx := context.Background()
 
+	// 首先检查 appToken 是否是 wiki token，如果是需要先获取 obj_token
+	realAppToken := appToken
+	
+	// 尝试使用 SDK 获取记录，如果失败则可能需要处理 wiki token
 	req := larkbitable.NewGetAppTableRecordReqBuilder().
-		AppToken(appToken).
+		AppToken(realAppToken).
 		TableId(tableID).
 		RecordId(recordID).
 		Build()
 
 	resp, err := s.client.Bitable.AppTableRecord.Get(ctx, req)
+	if err == nil && resp.Success() {
+		if resp.Data == nil || resp.Data.Record == nil {
+			return false, fmt.Errorf("记录数据为空")
+		}
+
+		// 检查字段是否都已完成
+		record := resp.Data.Record
+		for _, fieldName := range checkFields {
+			value := record.Fields[fieldName]
+			if value == nil || value == "" {
+				return false, nil
+			}
+		}
+
+		return true, nil
+	}
+
+	// 如果获取失败，可能是 wiki token，尝试HTTP API直接获取记录
+	fmt.Println("🔍 SDK获取记录失败，可能是 Wiki Token，尝试处理...")
+	
+	token, err := s.getTenantAccessToken()
 	if err != nil {
-		return false, fmt.Errorf("获取记录失败: %v", err)
+		return false, fmt.Errorf("获取访问令牌失败: %w", err)
 	}
 
-	if !resp.Success() {
-		return false, fmt.Errorf("获取记录失败: %s", resp.Msg)
+	// 尝试判断是否为 wiki token：如果以 "BEsNwa" 等开头，很可能是 wiki token
+	// 或者尝试调用 wiki API 检查
+	getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
+	nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
+	if err == nil {
+		nodeReq.Header.Set("Authorization", "Bearer "+token)
+		nodeResp, nodeErr := s.httpClient.Do(nodeReq)
+		if nodeErr == nil {
+			defer nodeResp.Body.Close()
+			nodeBody, _ := io.ReadAll(nodeResp.Body)
+			
+			type GetNodeResponse struct {
+				Code int `json:"code"`
+				Data struct {
+					Node struct {
+						ObjToken string `json:"obj_token"`
+						ObjType  string `json:"obj_type"`
+						Title    string `json:"title"`
+					} `json:"node"`
+				} `json:"data"`
+			}
+			var nodeResult GetNodeResponse
+			if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
+				if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
+					fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
+					realAppToken = nodeResult.Data.Node.ObjToken
+				}
+			}
+		}
 	}
 
-	if resp.Data == nil || resp.Data.Record == nil {
-		return false, fmt.Errorf("记录数据为空")
+	// 使用实际的 appToken 获取记录
+	recordURL := fmt.Sprintf("https://open.feishu.cn/open-apis/bitable/v1/apps/%s/tables/%s/records/%s?user_id_type=user_id", realAppToken, tableID, recordID)
+	
+	httpReq, err := http.NewRequest("GET", recordURL, nil)
+	if err != nil {
+		return false, fmt.Errorf("创建请求失败: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	httpResp, err := s.httpClient.Do(httpReq)
+	if err != nil {
+		return false, fmt.Errorf("获取记录失败: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	httpBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return false, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	type GetRecordResponse struct {
+		Code int `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			Record struct {
+				Fields map[string]interface{} `json:"fields"`
+			} `json:"record"`
+		} `json:"data"`
+	}
+
+	var getResult GetRecordResponse
+	if err := json.Unmarshal(httpBody, &getResult); err != nil {
+		return false, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if getResult.Code != 0 {
+		fmt.Printf("📋 获取记录API响应: %s\n", string(httpBody))
+		return false, fmt.Errorf("获取记录失败: %s (Code: %d)", getResult.Msg, getResult.Code)
 	}
 
 	// 检查字段是否都已完成
-	record := resp.Data.Record
 	for _, fieldName := range checkFields {
-		value := record.Fields[fieldName]
+		value := getResult.Data.Record.Fields[fieldName]
 		if value == nil || value == "" {
 			return false, nil
 		}

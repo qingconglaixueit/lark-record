@@ -41,6 +41,7 @@ type Field struct {
 	FieldName string `json:"field_name"`
 	FieldType string `json:"field_type"`
 	FieldID   string `json:"field_id"`
+	IsPrimary bool   `json:"is_primary"`
 }
 
 // Record 记录数据
