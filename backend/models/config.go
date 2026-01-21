@@ -48,6 +48,7 @@ type Field struct {
 	FieldType string `json:"field_type"`
 	FieldID   string `json:"field_id"`
 	IsPrimary bool   `json:"is_primary"`
+	UiType    string `json:"ui_type"`
 }
 
 // Record 记录数据

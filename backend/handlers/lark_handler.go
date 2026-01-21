@@ -143,6 +143,12 @@ func AddRecord(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请先配置飞书应用信息"})
 		return
 	}
+	
+	// 输出当前配置信息（用于调试）
+	fmt.Printf("当前配置信息：\n")
+	fmt.Printf("- AppID: %s\n", config.AppID)
+	fmt.Printf("- GroupChatID: %s\n", config.GroupChatID)
+	fmt.Printf("- Tables配置数量: %d\n", len(config.Tables))
 
 	var req models.AddRecordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -175,14 +181,34 @@ func AddRecord(c *gin.Context) {
 
 	if checkFields != nil && len(checkFields) > 0 && config.GroupChatID != "" {
 		go func() {
-			completed, err := larkService.CheckFieldsCompleted(req.AppToken, req.TableID, recordID, checkFields)
+			completed, fieldValues, err := larkService.CheckFieldsCompleted(req.AppToken, req.TableID, recordID, checkFields)
 			if err != nil {
 				fmt.Printf("检查字段状态失败: %v\n", err)
 				return
 			}
 
 			if completed {
-				message := fmt.Sprintf("记录已完成！记录ID: %s", recordID)
+				// 拼接字段值到消息中
+				message := fmt.Sprintf("记录已完成！记录ID: %s\n\n检测字段值：\n", recordID)
+				for fieldName, value := range fieldValues {
+					// 处理不同类型的值，确保消息格式清晰
+					switch v := value.(type) {
+					case string:
+						message += fmt.Sprintf("%s: %s\n", fieldName, v)
+					case []interface{}:
+						// 处理数组类型的值（如多选）
+						message += fmt.Sprintf("%s: ", fieldName)
+						for i, item := range v {
+							if i > 0 {
+								message += ", "
+							}
+							message += fmt.Sprintf("%v", item)
+						}
+						message += "\n"
+					default:
+						message += fmt.Sprintf("%s: %v\n", fieldName, v)
+					}
+				}
 				err = larkService.SendMessage(config.GroupChatID, message)
 				if err != nil {
 					fmt.Printf("发送消息失败: %v\n", err)
@@ -234,7 +260,7 @@ func CheckRecordStatus(c *gin.Context) {
 		checkFields = config.CheckFields
 	}
 	
-	completed, err := larkService.CheckFieldsCompleted(appToken, tableID, recordID, checkFields)
+	completed, _, err := larkService.CheckFieldsCompleted(appToken, tableID, recordID, checkFields)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

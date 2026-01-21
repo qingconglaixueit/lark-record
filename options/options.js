@@ -279,6 +279,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 } else {
                     console.warn('⚠ URL中的table ID不存在于返回的列表中:', urlTableId);
                 }
+            } else if (result.length > 0) {
+                // 默认选择第一个数据表
+                tableIdSelect.value = result[0].table_id;
+                console.log('✓ 自动选择第一个表格:', result[0].table_id);
+            }
+            
+            // 自动加载当前选中的数据表字段
+            if (tableIdSelect.value) {
+                loadTableFields(row);
             }
             
             row.dataset.appToken = appToken;
@@ -328,22 +337,43 @@ document.addEventListener('DOMContentLoaded', function() {
         checkFieldsList.innerHTML = '';
         
         fields.forEach(field => {
+            // 检查是否为必填字段，如果是则默认勾选
+            const isPrimary = field.is_primary === true;
+            
             const writeItem = document.createElement('div');
-            writeItem.style.cssText = 'margin-bottom: 5px;';
+            writeItem.style.cssText = 'margin-bottom: 5px; display: flex; align-items: center;';
             writeItem.innerHTML = `
-                <label style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" name="write_field" value="${field.field_name}" style="margin-right: 8px;">
-                    <span>${field.field_name} (${field.field_type})</span>
+                <label style="display: flex; align-items: center; cursor: pointer; flex: 1;">
+                    <input type="checkbox" name="write_field" value="${field.field_name}" 
+                           ${isPrimary ? 'checked' : ''} style="margin-right: 8px;">
+                    <span>${field.field_name} (${field.field_type}, ${field.ui_type || '未知'})${isPrimary ? ' *' : ''}</span>
                 </label>
+                <input type="text" name="write_field_default" 
+                       data-field="${field.field_name}" 
+                       placeholder="默认值（可选）" 
+                       style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; display: none; margin-left: 10px; width: 150px;">
             `;
             writeFieldsList.appendChild(writeItem);
             
+            // 为写入字段的复选框绑定事件，控制默认值输入框的显示
+            const writeCheckbox = writeItem.querySelector('input[name="write_field"]');
+            const writeDefaultInput = writeItem.querySelector('input[name="write_field_default"]');
+            writeCheckbox.addEventListener('change', () => {
+                writeDefaultInput.style.display = writeCheckbox.checked ? 'inline-block' : 'none';
+            });
+            
+            // 初始状态下，如果勾选了则显示输入框
+            if (writeCheckbox.checked) {
+                writeDefaultInput.style.display = 'inline-block';
+            }
+            
             const checkItem = document.createElement('div');
-            checkItem.style.cssText = 'margin-bottom: 5px;';
+            checkItem.style.cssText = 'margin-bottom: 5px; display: flex; align-items: center;';
             checkItem.innerHTML = `
-                <label style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" name="check_field" value="${field.field_name}" style="margin-right: 8px;">
-                    <span>${field.field_name} (${field.field_type})</span>
+                <label style="display: flex; align-items: center; cursor: pointer; flex: 1;">
+                    <input type="checkbox" name="check_field" value="${field.field_name}" 
+                           ${isPrimary ? 'checked' : ''} style="margin-right: 8px;">
+                    <span>${field.field_name} (${field.field_type}, ${field.ui_type || '未知'})${isPrimary ? ' *' : ''}</span>
                 </label>
             `;
             checkFieldsList.appendChild(checkItem);
@@ -366,14 +396,29 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 保存配置
     saveConfigBtn.addEventListener('click', async function() {
-        try {
-            const tables = [];
-            const rows = tableUrlsContainer.querySelectorAll('.table-url-row');
-            
-            if (rows.length === 0) {
-                showSaveResult('请至少添加一个表格', false);
-                return;
-            }
+    try {
+        const appId = appIdInput.value.trim();
+        const appSecret = appSecretInput.value.trim();
+        const groupChatId = groupChatIdInput.value.trim();
+
+        if (!appId || !appSecret) {
+            showSaveResult('请填写应用ID和密钥', false);
+            return;
+        }
+        
+        // 验证群聊ID格式（如果提供了的话）
+        if (groupChatId && !groupChatId.startsWith('oc_')) {
+            showSaveResult('群聊ID格式不正确，应以 oc_ 开头', false);
+            return;
+        }
+
+        const tables = [];
+        const rows = tableUrlsContainer.querySelectorAll('.table-url-row');
+        
+        if (rows.length === 0) {
+            showSaveResult('请至少添加一个表格', false);
+            return;
+        }
             
             for (const row of rows) {
                 const url = row.querySelector('.table-url-input').value.trim();
@@ -398,7 +443,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 const writeFields = [];
                 row.querySelectorAll('.write-fields-list input[type="checkbox"]:checked').forEach(cb => {
-                    writeFields.push(cb.value);
+                    const fieldName = cb.value;
+                    
+                    // 获取默认值
+                    const defaultInput = row.querySelector(`input[name="write_field_default"][data-field="${fieldName}"]`);
+                    const defaultValue = defaultInput ? defaultInput.value.trim() : '';
+                    
+                    writeFields.push({
+                        field_name: fieldName,
+                        default: defaultValue
+                    });
                 });
                 
                 if (writeFields.length === 0) {
@@ -422,11 +476,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             const config = {
-                app_id: currentConfigData.app_id,
-                app_secret: currentConfigData.app_secret,
-                tables: tables,
-                group_chat_id: groupChatIdInput.value.trim()
-            };
+            app_id: appId,
+            app_secret: appSecret,
+            tables: tables,
+            group_chat_id: groupChatId
+        };
             
             saveConfigBtn.disabled = true;
             saveResult.textContent = '保存中...';

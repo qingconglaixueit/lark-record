@@ -84,12 +84,15 @@ document.addEventListener('DOMContentLoaded', function() {
             const card = document.createElement('div');
             card.className = 'bitable-card';
             card.style.cssText = 'padding: 15px; margin-bottom: 10px; border: 1px solid #e0e0e0; border-radius: 8px; cursor: pointer; transition: all 0.2s;';
+            // 提取字段名数组
+            const fieldNames = table.write_fields.map(f => f.field_name);
+            
             card.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <div style="font-size: 24px;">📊</div>
                     <div style="flex: 1;">
                         <div style="font-weight: 600; margin-bottom: 4px;">${table.name}</div>
-                        <div style="font-size: 12px; color: #6b7280;">待写入字段: ${table.write_fields.join(', ')}</div>
+                        <div style="font-size: 12px; color: #6b7280;">待写入字段: ${fieldNames.join(', ')}</div>
                     </div>
                 </div>
             `;
@@ -140,7 +143,10 @@ document.addEventListener('DOMContentLoaded', function() {
     function displayInputFields(writeFields) {
         inputFields.innerHTML = '';
 
-        writeFields.forEach(fieldName => {
+        writeFields.forEach(field => {
+            const fieldName = field.field_name;
+            const defaultValue = field.default || '';
+            
             const fieldDiv = document.createElement('div');
             fieldDiv.className = 'field-group';
             fieldDiv.style.cssText = 'margin-bottom: 15px;';
@@ -154,6 +160,7 @@ document.addEventListener('DOMContentLoaded', function() {
             input.className = 'field-input';
             input.placeholder = `请输入${fieldName}`;
             input.dataset.fieldName = fieldName;
+            input.value = defaultValue;
             input.required = true;
             input.style.cssText = 'width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;';
 

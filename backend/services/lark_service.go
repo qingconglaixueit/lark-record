@@ -717,6 +717,7 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 					Property  *struct {
 						IsPrimary *bool `json:"is_primary"`
 					} `json:"property,omitempty"`
+					UiType    string `json:"ui_type"`
 				} `json:"items"`
 			} `json:"data"`
 		}
@@ -738,11 +739,12 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 				isPrimary = *field.Property.IsPrimary
 			}
 			fields = append(fields, models.Field{
-				FieldName: field.FieldName,
-				FieldType: fmt.Sprintf("%d", field.Type),
-				FieldID:   field.FieldId,
-				IsPrimary: isPrimary,
-			})
+					FieldName: field.FieldName,
+					FieldType: fmt.Sprintf("%d", field.Type),
+					FieldID:   field.FieldId,
+					IsPrimary: isPrimary,
+					UiType:    field.UiType,
+				})
 		}
 		fmt.Printf("✅ 成功获取到字段: %d 个\n", len(fields))
 		return fields, nil
@@ -866,6 +868,7 @@ func (s *LarkService) getTableFieldsViaHTTP(appToken, tableID string) ([]models.
 				Property  *struct {
 					IsPrimary *bool `json:"is_primary"`
 				} `json:"property,omitempty"`
+				UiType    string `json:"ui_type"`
 			} `json:"items"`
 		} `json:"data"`
 	}
@@ -890,6 +893,7 @@ func (s *LarkService) getTableFieldsViaHTTP(appToken, tableID string) ([]models.
 			FieldType: fmt.Sprintf("%d", field.Type),
 			FieldID:   field.FieldId,
 			IsPrimary: isPrimary,
+			UiType:    field.UiType,
 		})
 	}
 
@@ -996,8 +1000,8 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 		}
 	}
 
-	// 检查字段类型是否匹配
-	fmt.Println("🔍 检查字段类型是否匹配...")
+	// 检查字段类型是否匹配并格式化字段值
+	fmt.Println("🔍 检查字段类型是否匹配并格式化字段值...")
 	for fieldName, fieldValue := range fields {
 		// 查找对应的字段定义
 		var fieldDef *models.Field
@@ -1009,6 +1013,17 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 		}
 
 		if fieldDef != nil {
+			// 格式化字段值，特别是User类型字段
+			if fieldValue != nil && fieldValue != "" {
+				// 处理User类型字段（ui_type为User或field_type为11）
+				if (fieldDef.UiType == "User" || fieldDef.FieldType == "11") && !strings.Contains(fmt.Sprintf("%T", fieldValue), "[]") {
+					// 将普通字符串转换为User类型需要的格式: [{"id": "用户ID"}]
+					userId := fmt.Sprintf("%v", fieldValue)
+					fields[fieldName] = []interface{}{map[string]interface{}{"id": userId}}
+					fmt.Printf("✅ User类型字段 '%s' 的值已格式化: %+v\n", fieldName, fields[fieldName])
+				}
+			}
+
 			// 根据字段类型检查值
 			switch fieldDef.FieldType {
 			case "1": // 文本
@@ -1162,8 +1177,8 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 	return "", fmt.Errorf("新增记录失败: 未获取到记录ID")
 }
 
-// CheckFieldsCompleted 检查记录中的指定字段是否已完成
-func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, checkFields []string) (bool, error) {
+// CheckFieldsCompleted 检查记录中的指定字段是否已完成，并返回字段值
+func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, checkFields []string) (bool, map[string]interface{}, error) {
 	s.initClient()
 
 	ctx := context.Background()
@@ -1181,19 +1196,24 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 	resp, err := s.client.Bitable.AppTableRecord.Get(ctx, req)
 	if err == nil && resp.Success() {
 		if resp.Data == nil || resp.Data.Record == nil {
-			return false, fmt.Errorf("记录数据为空")
+			return false, nil, fmt.Errorf("记录数据为空")
 		}
 
-		// 检查字段是否都已完成
+		// 检查字段是否都已完成，并收集字段值
 		record := resp.Data.Record
+		fieldValues := make(map[string]interface{})
+		allCompleted := true
+
 		for _, fieldName := range checkFields {
 			value := record.Fields[fieldName]
 			if value == nil || value == "" {
-				return false, nil
+				allCompleted = false
+				break
 			}
+			fieldValues[fieldName] = value
 		}
 
-		return true, nil
+		return allCompleted, fieldValues, nil
 	}
 
 	// 如果获取失败，可能是 wiki token，尝试HTTP API直接获取记录
@@ -1201,7 +1221,7 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 
 	token, err := s.getTenantAccessToken()
 	if err != nil {
-		return false, fmt.Errorf("获取访问令牌失败: %w", err)
+		return false, nil, fmt.Errorf("获取访问令牌失败: %w", err)
 	}
 
 	// 尝试判断是否为 wiki token：如果以 "BEsNwa" 等开头，很可能是 wiki token
@@ -1240,20 +1260,20 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 
 	httpReq, err := http.NewRequest("GET", recordURL, nil)
 	if err != nil {
-		return false, fmt.Errorf("创建请求失败: %w", err)
+		return false, nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+token)
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	httpResp, err := s.httpClient.Do(httpReq)
 	if err != nil {
-		return false, fmt.Errorf("获取记录失败: %w", err)
+		return false, nil, fmt.Errorf("获取记录失败: %w", err)
 	}
 	defer httpResp.Body.Close()
 
 	httpBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return false, fmt.Errorf("读取响应失败: %w", err)
+		return false, nil, fmt.Errorf("读取响应失败: %w", err)
 	}
 
 	type GetRecordResponse struct {
@@ -1268,23 +1288,28 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 
 	var getResult GetRecordResponse
 	if err := json.Unmarshal(httpBody, &getResult); err != nil {
-		return false, fmt.Errorf("解析响应失败: %w", err)
+		return false, nil, fmt.Errorf("解析响应失败: %w", err)
 	}
 
 	if getResult.Code != 0 {
 		fmt.Printf("📋 获取记录API响应: %s\n", string(httpBody))
-		return false, fmt.Errorf("获取记录失败: %s (Code: %d)", getResult.Msg, getResult.Code)
+		return false, nil, fmt.Errorf("获取记录失败: %s (Code: %d)", getResult.Msg, getResult.Code)
 	}
 
-	// 检查字段是否都已完成
+	// 检查字段是否都已完成，并收集字段值
+	fieldValues := make(map[string]interface{})
+	allCompleted := true
+
 	for _, fieldName := range checkFields {
 		value := getResult.Data.Record.Fields[fieldName]
 		if value == nil || value == "" {
-			return false, nil
+			allCompleted = false
+			break
 		}
+		fieldValues[fieldName] = value
 	}
 
-	return true, nil
+	return allCompleted, fieldValues, nil
 }
 
 // SendMessage 发送消息到群聊
@@ -1312,13 +1337,28 @@ func (s *LarkService) SendMessage(groupChatID, message string) error {
 		Body(body).
 		Build()
 
+	// 输出发送消息的详细信息
+	fmt.Printf("📤 准备发送消息到群聊 %s\n", groupChatID)
+	fmt.Printf("📝 消息内容: %s\n", message)
+
 	resp, err := s.client.Im.Message.Create(ctx, req)
 	if err != nil {
+		fmt.Printf("❌ 发送消息失败: %v\n", err)
 		return fmt.Errorf("发送消息失败: %v", err)
 	}
 
 	if !resp.Success() {
-		return fmt.Errorf("发送消息失败: %s", resp.Msg)
+		fmt.Printf("❌ 发送消息失败: %s (Code: %d)\n", resp.Msg, resp.Code)
+		// 输出完整的响应信息以帮助诊断
+		respBytes, _ := json.Marshal(resp)
+		fmt.Printf("📋 完整响应: %s\n", string(respBytes))
+		return fmt.Errorf("发送消息失败: %s (Code: %d)", resp.Msg, resp.Code)
+	}
+
+	// 输出发送成功的信息
+	fmt.Printf("✅ 消息发送成功!\n")
+	if resp.Data != nil && resp.Data.MessageId != nil && *resp.Data.MessageId != "" {
+		fmt.Printf("📄 消息ID: %s\n", *resp.Data.MessageId)
 	}
 
 	return nil
