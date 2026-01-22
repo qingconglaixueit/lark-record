@@ -21,12 +21,14 @@ type Config struct {
 
 // TableConfig 单个表格的配置
 type TableConfig struct {
-	URL         string       `json:"url"`          // 飞书多维表格URL
-	AppToken    string       `json:"app_token"`    // 从URL解析的app_token
-	TableID     string       `json:"table_id"`     // 数据表ID
-	Name        string       `json:"name"`         // 表格名称
-	WriteFields []WriteField `json:"write_fields"` // 待写入的字段
-	CheckFields []string     `json:"check_fields"` // 需要检测是否有值的字段
+	URL              string       `json:"url"`               // 飞书多维表格URL
+	AppToken         string       `json:"app_token"`         // 从URL解析的app_token
+	TableID          string       `json:"table_id"`          // 数据表ID
+	Name             string       `json:"name"`              // 表格名称
+	WriteFields      []WriteField `json:"write_fields"`      // 待写入的字段
+	CheckFields      []string     `json:"check_fields"`      // 需要检测是否有值的字段
+	CreateTask       bool         `json:"create_task"`       // 是否创建任务
+	TaskSummaryField string       `json:"task_summary_field"` // 任务标题字段
 }
 
 // Bitable 飞书多维表格

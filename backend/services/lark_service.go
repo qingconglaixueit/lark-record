@@ -183,12 +183,28 @@ func (s *LarkService) GetBitables() ([]models.Bitable, error) {
 }
 
 // GetBitableTables 获取多维表格中的所有数据表
-func (s *LarkService) GetBitableTables(appToken string) ([]models.TableInfo, error) {
+func (s *LarkService) GetBitableTables(appToken string, isWiki bool) ([]models.TableInfo, error) {
 	s.initClient()
 
-	ctx := context.Background()
+	// 如果前端明确指出是wiki类型，直接处理
+	if isWiki {
+		fmt.Println("🔍 前端标识为Wiki Token，直接处理...")
+		// 尝试通过HTTP API直接获取数据表
+		tables, err := s.fetchWikiTablesDirectly(appToken)
+		if err != nil {
+			return []models.TableInfo{}, fmt.Errorf("Wiki链接处理失败: %v", err)
+		}
 
-	// 尝试直接使用bitable API
+		if len(tables) > 0 {
+			fmt.Printf("✅ 成功获取到Wiki中的数据表: %d 个\n", len(tables))
+			return tables, nil
+		}
+
+		return []models.TableInfo{}, nil
+	}
+
+	// 否则，尝试直接使用bitable API
+	ctx := context.Background()
 	req := larkbitable.NewListAppTableReqBuilder().
 		AppToken(appToken).
 		Build()
@@ -198,10 +214,10 @@ func (s *LarkService) GetBitableTables(appToken string) ([]models.TableInfo, err
 		return nil, fmt.Errorf("获取数据表列表失败: %v", err)
 	}
 
-	// 如果返回91402错误，可能是wiki token，尝试处理
+	// 如果返回91402、99991663或1254003错误，可能是wiki token，尝试处理
 	if !resp.Success() {
-		if resp.Code == 91402 || resp.Code == 99991663 {
-			fmt.Println("🔍 检测到Wiki Token，尝试处理...")
+		if resp.Code == 91402 || resp.Code == 99991663 || resp.Code == 1254003 {
+			fmt.Println("🔍 API调用失败，检测到可能是Wiki Token，尝试处理...")
 
 			// 尝试通过HTTP API直接获取数据表
 			tables, err := s.fetchWikiTablesDirectly(appToken)
@@ -1312,6 +1328,114 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 	return allCompleted, fieldValues, nil
 }
 
+// GetRecord 获取记录的所有字段
+func (s *LarkService) GetRecord(appToken, tableID, recordID string) (map[string]interface{}, error) {
+	s.initClient()
+
+	ctx := context.Background()
+
+	// 首先检查 appToken 是否是 wiki token，如果是需要先获取 obj_token
+	realAppToken := appToken
+
+	// 尝试使用 SDK 获取记录，如果失败则可能需要处理 wiki token
+	req := larkbitable.NewGetAppTableRecordReqBuilder().
+		AppToken(realAppToken).
+		TableId(tableID).
+		RecordId(recordID).
+		Build()
+
+	resp, err := s.client.Bitable.AppTableRecord.Get(ctx, req)
+	if err == nil && resp.Success() {
+		if resp.Data == nil || resp.Data.Record == nil {
+			return nil, fmt.Errorf("记录数据为空")
+		}
+
+		return resp.Data.Record.Fields, nil
+	}
+
+	// 如果获取失败，可能是 wiki token，尝试HTTP API直接获取记录
+	fmt.Println("🔍 SDK获取记录失败，可能是 Wiki Token，尝试处理...")
+
+	token, err := s.getTenantAccessToken()
+	if err != nil {
+		return nil, fmt.Errorf("获取访问令牌失败: %w", err)
+	}
+
+	// 尝试判断是否为 wiki token：如果以 "BEsNwa" 等开头，很可能是 wiki token
+	// 或者尝试调用 wiki API 检查
+	getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
+	nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
+	if err == nil {
+		nodeReq.Header.Set("Authorization", "Bearer "+token)
+		nodeResp, nodeErr := s.httpClient.Do(nodeReq)
+		if nodeErr == nil {
+			defer nodeResp.Body.Close()
+			nodeBody, _ := io.ReadAll(nodeResp.Body)
+
+			type GetNodeResponse struct {
+				Code int `json:"code"`
+				Data struct {
+					Node struct {
+						ObjToken string `json:"obj_token"`
+						ObjType  string `json:"obj_type"`
+						Title    string `json:"title"`
+					} `json:"node"`
+				} `json:"data"`
+			}
+			var nodeResult GetNodeResponse
+			if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
+				if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
+					fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
+					realAppToken = nodeResult.Data.Node.ObjToken
+				}
+			}
+		}
+	}
+
+	// 使用实际的 appToken 获取记录
+	recordURL := fmt.Sprintf("https://open.feishu.cn/open-apis/bitable/v1/apps/%s/tables/%s/records/%s?user_id_type=user_id", realAppToken, tableID, recordID)
+
+	httpReq, err := http.NewRequest("GET", recordURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	httpResp, err := s.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("获取记录失败: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	httpBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	type GetRecordResponse struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			Record struct {
+				Fields map[string]interface{} `json:"fields"`
+			} `json:"record"`
+		} `json:"data"`
+	}
+
+	var getResult GetRecordResponse
+	if err := json.Unmarshal(httpBody, &getResult); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if getResult.Code != 0 {
+		fmt.Printf("📋 获取记录API响应: %s\n", string(httpBody))
+		return nil, fmt.Errorf("获取记录失败: %s (Code: %d)", getResult.Msg, getResult.Code)
+	}
+
+	return getResult.Data.Record.Fields, nil
+}
+
 // SendMessage 发送消息到群聊
 func (s *LarkService) SendMessage(groupChatID, message string) error {
 	s.initClient()
@@ -1362,6 +1486,91 @@ func (s *LarkService) SendMessage(groupChatID, message string) error {
 	}
 
 	return nil
+}
+
+// CreateTask 创建任务
+func (s *LarkService) CreateTask(assigneeID, title string, dueTimestamp int64, isAllDay bool) (string, error) {
+	token, err := s.getTenantAccessToken()
+	if err != nil {
+		return "", fmt.Errorf("获取访问令牌失败: %w", err)
+	}
+
+	// 构建请求体，使用用户提供的API格式
+	reqBody := map[string]interface{}{
+		"summary": title,
+		"due": map[string]interface{}{
+			"timestamp": dueTimestamp,
+			"is_all_day": isAllDay,
+		},
+		"members": []map[string]interface{}{
+			{
+				"id":   assigneeID,
+				"type": "user",
+				"role": "assignee",
+				"name": "",
+			},
+		},
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", fmt.Errorf("请求体序列化失败: %w", err)
+	}
+
+	// 创建HTTP请求，使用用户提供的API端点
+	req, err := http.NewRequest(
+		"POST",
+		"https://open.feishu.cn/open-apis/task/v2/tasks?user_id_type=user_id",
+		bytes.NewReader(jsonData),
+	)
+	if err != nil {
+		return "", fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	// 发送请求
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("创建任务失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("读取响应失败: %w", err)
+	}
+
+	// 解析响应
+	type CreateTaskResponse struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			Task struct {
+				TaskID string `json:"task_id"`
+				GUID   string `json:"guid"`
+				URL    string `json:"url"`
+			} `json:"task"`
+		} `json:"data"`
+	}
+
+	var result CreateTaskResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	if result.Code != 0 {
+		fmt.Printf("📋 创建任务API响应: %s\n", string(body))
+		return "", fmt.Errorf("创建任务失败: %s (Code: %d)", result.Msg, result.Code)
+	}
+
+	// 输出创建成功的信息
+	fmt.Printf("✅ 任务创建成功! 任务ID: %s, 任务GUID: %s\n", result.Data.Task.TaskID, result.Data.Task.GUID)
+	fmt.Printf("🔗 任务链接: %s\n", result.Data.Task.URL)
+
+	return result.Data.Task.TaskID, nil
 }
 
 // getTenantAccessToken 获取租户访问令牌
