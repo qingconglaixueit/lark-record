@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const loading = document.getElementById('loading');
     
     const goToConfigBtn = document.getElementById('goToConfig');
+    const configTableBtn = document.getElementById('configTableBtn');
     const changeTableBtn = document.getElementById('changeTable');
     const submitRecordBtn = document.getElementById('submitRecord');
     const submitResult = document.getElementById('submitResult');
@@ -122,6 +123,9 @@ document.addEventListener('DOMContentLoaded', function() {
             
             selectedTable = table;
             
+            // 调试：查看writeFields的数据结构
+            console.log('writeFields:', table.write_fields);
+            
             // 显示输入字段
             displayInputFields(table.write_fields);
             
@@ -146,6 +150,7 @@ document.addEventListener('DOMContentLoaded', function() {
         writeFields.forEach(field => {
             const fieldName = field.field_name;
             const defaultValue = field.default || '';
+            const uiType = (field.ui_type || '').toLowerCase();
             
             const fieldDiv = document.createElement('div');
             fieldDiv.className = 'field-group';
@@ -155,14 +160,24 @@ document.addEventListener('DOMContentLoaded', function() {
             label.textContent = fieldName;
             label.style.cssText = 'display: block; margin-bottom: 5px; font-weight: 500;';
             
-            const input = document.createElement('input');
-            input.type = 'text';
+            let input;
+            if (uiType === 'text') {
+                // 使用多行文本框
+                input = document.createElement('textarea');
+                input.rows = 4;
+                input.style.cssText = 'width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; resize: vertical;';
+            } else {
+                // 使用单行输入框
+                input = document.createElement('input');
+                input.type = 'text';
+                input.style.cssText = 'width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;';
+            }
+            
             input.className = 'field-input';
             input.placeholder = `请输入${fieldName}`;
             input.dataset.fieldName = fieldName;
             input.value = defaultValue;
             input.required = true;
-            input.style.cssText = 'width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;';
 
             fieldDiv.appendChild(label);
             fieldDiv.appendChild(input);
@@ -172,8 +187,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 提交记录
     submitRecordBtn.addEventListener('click', async function() {
-        // 验证所有必填字段
-        const inputs = inputFields.querySelectorAll('input');
+        // 验证所有必填字段（同时查询input和textarea元素）
+        const inputs = inputFields.querySelectorAll('input, textarea');
         const fieldsData = {};
         
         for (const input of inputs) {
@@ -258,6 +273,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 去配置页面
     goToConfigBtn.addEventListener('click', function() {
-        chrome.tabs.create({ url: 'options.html' });
+        chrome.tabs.create({ url: 'options/options.html' });
+    });
+
+    // 配置表格按钮
+    configTableBtn.addEventListener('click', function() {
+        chrome.tabs.create({ url: 'options/options.html' });
     });
 });

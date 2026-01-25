@@ -119,6 +119,8 @@ func (s *LarkService) ValidateCredentials() error {
 	return nil
 }
 
+// 原有的CreateTask方法已删除，使用后续的HTTP实现版本
+
 // initClient 初始化飞书客户端
 func (s *LarkService) initClient() {
 	if s.client == nil {
@@ -733,7 +735,7 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 					Property  *struct {
 						IsPrimary *bool `json:"is_primary"`
 					} `json:"property,omitempty"`
-					UiType    string `json:"ui_type"`
+					UiType string `json:"ui_type"`
 				} `json:"items"`
 			} `json:"data"`
 		}
@@ -755,12 +757,12 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 				isPrimary = *field.Property.IsPrimary
 			}
 			fields = append(fields, models.Field{
-					FieldName: field.FieldName,
-					FieldType: fmt.Sprintf("%d", field.Type),
-					FieldID:   field.FieldId,
-					IsPrimary: isPrimary,
-					UiType:    field.UiType,
-				})
+				FieldName: field.FieldName,
+				FieldType: fmt.Sprintf("%d", field.Type),
+				FieldID:   field.FieldId,
+				IsPrimary: isPrimary,
+				UiType:    field.UiType,
+			})
 		}
 		fmt.Printf("✅ 成功获取到字段: %d 个\n", len(fields))
 		return fields, nil
@@ -793,18 +795,19 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 		}
 	}
 
-	// 如果SDK获取到了字段，但可能缺少is_primary信息，尝试通过HTTP API获取更详细的字段信息
+	// 如果SDK获取到了字段，但可能缺少is_primary和ui_type信息，尝试通过HTTP API获取更详细的字段信息
 	if len(fields) > 0 {
 		fmt.Println("🔍 SDK获取字段成功，尝试通过HTTP API获取更详细的字段信息...")
 		detailedFields, err := s.getTableFieldsViaHTTP(appToken, tableID)
 		if err != nil {
 			fmt.Printf("⚠️ 通过HTTP API获取详细字段信息失败: %v，使用SDK获取的字段信息\n", err)
 		} else {
-			// 合并SDK和HTTP API获取的字段信息，以SDK的字段顺序为准，补充is_primary信息
+			// 合并SDK和HTTP API获取的字段信息，以SDK的字段顺序为准，补充is_primary和ui_type信息
 			for i, sdkField := range fields {
 				for _, httpField := range detailedFields {
 					if sdkField.FieldID == httpField.FieldID {
 						fields[i].IsPrimary = httpField.IsPrimary
+						fields[i].UiType = httpField.UiType
 						break
 					}
 				}
@@ -884,7 +887,7 @@ func (s *LarkService) getTableFieldsViaHTTP(appToken, tableID string) ([]models.
 				Property  *struct {
 					IsPrimary *bool `json:"is_primary"`
 				} `json:"property,omitempty"`
-				UiType    string `json:"ui_type"`
+				UiType string `json:"ui_type"`
 			} `json:"items"`
 		} `json:"data"`
 	}
@@ -1195,46 +1198,9 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 
 // CheckFieldsCompleted 检查记录中的指定字段是否已完成，并返回字段值
 func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, checkFields []string) (bool, map[string]interface{}, error) {
-	s.initClient()
-
-	ctx := context.Background()
-
+	// 直接使用HTTP API获取记录，确保指定user_id_type=user_id
 	// 首先检查 appToken 是否是 wiki token，如果是需要先获取 obj_token
 	realAppToken := appToken
-
-	// 尝试使用 SDK 获取记录，如果失败则可能需要处理 wiki token
-	req := larkbitable.NewGetAppTableRecordReqBuilder().
-		AppToken(realAppToken).
-		TableId(tableID).
-		RecordId(recordID).
-		Build()
-
-	resp, err := s.client.Bitable.AppTableRecord.Get(ctx, req)
-	if err == nil && resp.Success() {
-		if resp.Data == nil || resp.Data.Record == nil {
-			return false, nil, fmt.Errorf("记录数据为空")
-		}
-
-		// 检查字段是否都已完成，并收集字段值
-		record := resp.Data.Record
-		fieldValues := make(map[string]interface{})
-		allCompleted := true
-
-		for _, fieldName := range checkFields {
-			value := record.Fields[fieldName]
-			if value == nil || value == "" {
-				allCompleted = false
-				break
-			}
-			fieldValues[fieldName] = value
-		}
-
-		return allCompleted, fieldValues, nil
-	}
-
-	// 如果获取失败，可能是 wiki token，尝试HTTP API直接获取记录
-	fmt.Println("🔍 SDK获取记录失败，可能是 Wiki Token，尝试处理...")
-
 	token, err := s.getTenantAccessToken()
 	if err != nil {
 		return false, nil, fmt.Errorf("获取访问令牌失败: %w", err)
@@ -1271,7 +1237,7 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 		}
 	}
 
-	// 使用实际的 appToken 获取记录
+	// 使用实际的 appToken 获取记录，确保使用user_id_type=user_id
 	recordURL := fmt.Sprintf("https://open.feishu.cn/open-apis/bitable/v1/apps/%s/tables/%s/records/%s?user_id_type=user_id", realAppToken, tableID, recordID)
 
 	httpReq, err := http.NewRequest("GET", recordURL, nil)
@@ -1330,32 +1296,9 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 
 // GetRecord 获取记录的所有字段
 func (s *LarkService) GetRecord(appToken, tableID, recordID string) (map[string]interface{}, error) {
-	s.initClient()
-
-	ctx := context.Background()
-
+	// 直接使用HTTP API获取记录，确保指定user_id_type=user_id
 	// 首先检查 appToken 是否是 wiki token，如果是需要先获取 obj_token
 	realAppToken := appToken
-
-	// 尝试使用 SDK 获取记录，如果失败则可能需要处理 wiki token
-	req := larkbitable.NewGetAppTableRecordReqBuilder().
-		AppToken(realAppToken).
-		TableId(tableID).
-		RecordId(recordID).
-		Build()
-
-	resp, err := s.client.Bitable.AppTableRecord.Get(ctx, req)
-	if err == nil && resp.Success() {
-		if resp.Data == nil || resp.Data.Record == nil {
-			return nil, fmt.Errorf("记录数据为空")
-		}
-
-		return resp.Data.Record.Fields, nil
-	}
-
-	// 如果获取失败，可能是 wiki token，尝试HTTP API直接获取记录
-	fmt.Println("🔍 SDK获取记录失败，可能是 Wiki Token，尝试处理...")
-
 	token, err := s.getTenantAccessToken()
 	if err != nil {
 		return nil, fmt.Errorf("获取访问令牌失败: %w", err)
@@ -1392,7 +1335,7 @@ func (s *LarkService) GetRecord(appToken, tableID, recordID string) (map[string]
 		}
 	}
 
-	// 使用实际的 appToken 获取记录
+	// 使用实际的 appToken 获取记录，确保使用user_id_type=user_id
 	recordURL := fmt.Sprintf("https://open.feishu.cn/open-apis/bitable/v1/apps/%s/tables/%s/records/%s?user_id_type=user_id", realAppToken, tableID, recordID)
 
 	httpReq, err := http.NewRequest("GET", recordURL, nil)
@@ -1489,32 +1432,42 @@ func (s *LarkService) SendMessage(groupChatID, message string) error {
 }
 
 // CreateTask 创建任务
-func (s *LarkService) CreateTask(assigneeID, title string, dueTimestamp int64, isAllDay bool) (string, error) {
+func (s *LarkService) CreateTask(title string, dueTimestamp int64, isAllDay bool, assignees []map[string]interface{}) error {
 	token, err := s.getTenantAccessToken()
 	if err != nil {
-		return "", fmt.Errorf("获取访问令牌失败: %w", err)
+		return fmt.Errorf("获取访问令牌失败: %w", err)
+	}
+
+	// 构建成员列表
+	var members []map[string]interface{}
+	for _, assignee := range assignees {
+		if id, ok := assignee["id"].(string); ok {
+			members = append(members, map[string]interface{}{
+				"id":   id,
+				"type": "user",
+				"role": "assignee",
+				"name": "",
+			})
+		}
+	}
+
+	if len(members) == 0 {
+		return fmt.Errorf("没有有效的负责人ID")
 	}
 
 	// 构建请求体，使用用户提供的API格式
 	reqBody := map[string]interface{}{
 		"summary": title,
 		"due": map[string]interface{}{
-			"timestamp": dueTimestamp,
+			"timestamp":  dueTimestamp,
 			"is_all_day": isAllDay,
 		},
-		"members": []map[string]interface{}{
-			{
-				"id":   assigneeID,
-				"type": "user",
-				"role": "assignee",
-				"name": "",
-			},
-		},
+		"members": members,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", fmt.Errorf("请求体序列化失败: %w", err)
+		return fmt.Errorf("请求体序列化失败: %w", err)
 	}
 
 	// 创建HTTP请求，使用用户提供的API端点
@@ -1524,7 +1477,7 @@ func (s *LarkService) CreateTask(assigneeID, title string, dueTimestamp int64, i
 		bytes.NewReader(jsonData),
 	)
 	if err != nil {
-		return "", fmt.Errorf("创建请求失败: %w", err)
+		return fmt.Errorf("创建请求失败: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -1533,14 +1486,14 @@ func (s *LarkService) CreateTask(assigneeID, title string, dueTimestamp int64, i
 	// 发送请求
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("创建任务失败: %w", err)
+		return fmt.Errorf("创建任务失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// 读取响应
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
+		return fmt.Errorf("读取响应失败: %w", err)
 	}
 
 	// 解析响应
@@ -1558,19 +1511,19 @@ func (s *LarkService) CreateTask(assigneeID, title string, dueTimestamp int64, i
 
 	var result CreateTaskResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("解析响应失败: %w", err)
+		return fmt.Errorf("解析响应失败: %w", err)
 	}
 
 	if result.Code != 0 {
 		fmt.Printf("📋 创建任务API响应: %s\n", string(body))
-		return "", fmt.Errorf("创建任务失败: %s (Code: %d)", result.Msg, result.Code)
+		return fmt.Errorf("创建任务失败: %s (Code: %d)", result.Msg, result.Code)
 	}
 
 	// 输出创建成功的信息
 	fmt.Printf("✅ 任务创建成功! 任务ID: %s, 任务GUID: %s\n", result.Data.Task.TaskID, result.Data.Task.GUID)
 	fmt.Printf("🔗 任务链接: %s\n", result.Data.Task.URL)
 
-	return result.Data.Task.TaskID, nil
+	return nil
 }
 
 // getTenantAccessToken 获取租户访问令牌

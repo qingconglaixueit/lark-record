@@ -1,7 +1,6 @@
 {
-  "default_app": {
-    "app_id": "cli_a9d27bd8db78dbb4",
-    "app_secret": "swcvzxSrgtxMQsSr4YMyLfPdTnbbAibe"
-  },
-  "description": "飞书记录助手默认应用配置"
+  "app_id": "",
+  "app_secret": "",
+  "tables": [],
+  "group_chat_id": ""
 }

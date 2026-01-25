@@ -52,16 +52,7 @@ lark-record/
 └── icons/                   # 图标文件
 ```
 
-## 内置配置
 
-为了方便用户快速使用，项目内置了默认的飞书应用配置：
-
-- **App ID**: `cli_a9d27bd8db78dbb4`
-- **App Secret**: `swcvzxSrgtxMQsSr4YMyLfPdTnbbAibe`
-
-该应用已配置了必要的权限，可以直接使用。在配置页面点击“⚡ 使用内置配置”按钮即可加载。
-
-> ⚠️ **注意**：内置配置仅供快速体验使用，生产环境建议使用自己创建的飞书应用。
 
 ## 安装步骤
 
@@ -112,10 +103,9 @@ go run main.go
 #### 配置扩展
 
 1. 点击扩展图标，选择“选项”或右键点击扩展选择“选项”
-2. **（推荐）点击“⚡ 使用内置配置”按钮快速加载预设的飞书应用配置**
-3. 或手动填写飞书应用的 `App ID` 和 `App Secret`
-4. 点击“测试配置”验证配置是否正确
-5. 配置通过后，添加你的多维表格URL（支持直接表格和知识库表格）
+2. 手动填写飞书应用的 `App ID` 和 `App Secret`
+3. 点击“测试配置”验证配置是否正确
+4. 配置通过后，添加你的多维表格URL（支持直接表格和知识库表格）
 
 ### 2. 选择多维表格和字段
 
@@ -141,6 +131,164 @@ go run main.go
 - 后端会自动检测到字段完成
 - 向配置的群聊发送完成通知消息
 - 通知内容包含记录ID等信息
+
+## 详细使用指南
+
+### 一、后端服务使用
+
+#### 启动后端服务
+
+1. 确保已安装Go 1.21+环境：
+   - [Go下载地址](https://go.dev/dl/)
+   - 验证安装：`go version`
+
+2. 进入后端目录：
+```bash
+cd backend
+```
+
+3. 安装依赖：
+```bash
+go mod tidy
+```
+
+4. 启动服务：
+```bash
+go run main.go
+```
+
+5. 验证服务是否运行：
+   - 访问 `http://localhost:8080`
+   - 应看到 "飞书记录助手后端服务运行中" 的提示
+
+#### 后端配置
+
+- 配置文件：`backend/config.json`
+- 默认端口：`8080`，可在 `main.go` 中修改
+
+#### 后端日志
+
+- 日志文件：`backend/server.log`
+- 包含API请求、飞书交互和错误信息
+
+### 二、前端扩展使用
+
+#### 配置页面
+
+1. 打开扩展选项页面：
+   - 点击浏览器工具栏中的扩展图标
+   - 选择"选项"
+   - 或右键点击扩展图标，选择"选项"
+
+2. 飞书应用配置：
+   - 使用内置配置或手动输入App ID和App Secret
+   - 点击"测试配置"验证
+
+3. 多维表格配置：
+   - 添加多维表格URL
+   - 选择表格和数据表
+   - 配置字段和群聊
+
+#### 弹窗页面
+
+1. 打开弹窗：
+   - 点击浏览器工具栏中的扩展图标
+
+2. 记录数据：
+   - 选择多维表格
+   - 填写字段值
+   - 点击"记录数据"提交
+
+### 三、飞书应用权限设置
+
+#### 1. 进入飞书开放平台
+
+- 访问：[飞书开放平台](https://open.feishu.cn/)
+- 登录飞书账号
+
+#### 2. 创建或选择应用
+
+- 创建应用：[创建飞书应用指南](https://open.feishu.cn/document/home/introduction-to-application-creation/create-an-application)
+- 或选择已创建的应用
+
+#### 3. 配置应用权限
+
+1. 进入应用的"权限管理"页面
+2. 添加以下权限：
+
+| 权限名称 | 权限ID | 权限范围 | 操作步骤 |
+|---------|--------|---------|--------|
+| 读取多维表格 | `bitable:app` | 应用 | [添加权限指南](https://open.feishu.cn/document/uAjLw4CM/ugTN1YjL4UTN24CO1UjN/trouble-shooting/how-to-apply-for-permissions#359b9f0a) |
+| 只读多维表格 | `bitable:app:readonly` | 应用 | [添加权限指南](https://open.feishu.cn/document/uAjLw4CM/ugTN1YjL4UTN24CO1UjN/trouble-shooting/how-to-apply-for-permissions#359b9f0a) |
+| 访问云文档 | `drive:drive` | 应用 | [添加权限指南](https://open.feishu.cn/document/uAjLw4CM/ugTN1YjL4UTN24CO1UjN/trouble-shooting/how-to-apply-for-permissions#359b9f0a) |
+| 发送消息 | `im:message` | 应用 | [添加权限指南](https://open.feishu.cn/document/uAjLw4CM/ugTN1YjL4UTN24CO1UjN/trouble-shooting/how-to-apply-for-permissions#359b9f0a) |
+
+3. 点击"申请权限"按钮
+4. 等待权限审核通过（通常即时通过）
+
+#### 4. 配置安全设置
+
+1. 进入"安全设置"页面
+2. 配置"重定向URL"（如需要）
+3. 配置"IP白名单"（如需要）
+
+### 四、获取飞书用户ID
+
+#### 方法一：从飞书客户端获取
+
+1. 打开飞书客户端
+2. 点击左上角头像
+3. 选择"设置" -> "账号与安全"
+4. 在"飞书ID"处查看
+
+#### 方法二：通过飞书API获取
+
+- 调用用户信息API：[获取用户信息API文档](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/contact-v3/user/get)
+- 需要 `contact:user.base:readonly` 权限
+
+### 五、创建飞书群聊
+
+#### 创建群聊
+
+1. 打开飞书客户端
+2. 点击左侧"消息"面板
+3. 点击右上角"+"号
+4. 选择"创建群聊"
+5. 选择群成员
+6. 设置群名称
+7. 点击"创建"
+
+#### 获取群聊ID
+
+1. 打开飞书客户端
+2. 进入目标群聊
+3. 右键点击群聊名称
+4. 选择"复制群ID"
+5. 将复制的群ID粘贴到配置页面
+
+更多详情：[飞书群聊管理指南](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/chat/overview)
+
+### 六、将应用添加为多维表格协作者
+
+#### 1. 打开多维表格
+
+- 在飞书客户端或网页端打开目标多维表格
+
+#### 2. 打开协作设置
+
+1. 点击右上角"分享"按钮
+2. 或点击"设置" -> "协作设置"
+
+#### 3. 添加应用为协作者
+
+1. 在协作设置中，点击"添加协作者"
+2. 选择"按成员/应用添加"
+3. 在搜索框中输入应用名称
+4. 选择应用
+5. 设置协作权限（建议设置为"编辑者"或"查看者"）
+6. 点击"添加"
+
+更多详情：[多维表格协作指南](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/bitable-v1/app-collaborator/overview)
 
 ## 配置说明
 

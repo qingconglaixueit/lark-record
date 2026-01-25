@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"lark-record/models"
 	"lark-record/services"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -16,28 +19,121 @@ import (
 var configCache models.Config
 var cacheMutex sync.RWMutex
 
-// SaveConfig 保存配置
+// 配置文件路径 - 使用相对路径
+const configFilePath = "./config.json"
+
+// 初始化配置 - 从文件加载
+func init() {
+	loadConfigFromFile()
+}
+
+// loadConfigFromFile 从文件加载配置
+func loadConfigFromFile() {
+	cacheMutex.Lock()
+	defer cacheMutex.Unlock()
+
+	// 检查文件是否存在
+	if _, err := os.Stat(configFilePath); os.IsNotExist(err) {
+		fmt.Println("配置文件不存在，将使用默认配置")
+		return
+	}
+
+	// 读取文件内容
+	data, err := ioutil.ReadFile(configFilePath)
+	if err != nil {
+		fmt.Printf("读取配置文件失败: %v\n", err)
+		return
+	}
+
+	// 解析JSON
+	if err := json.Unmarshal(data, &configCache); err != nil {
+		fmt.Printf("解析配置文件失败: %v\n", err)
+		return
+	}
+
+	fmt.Println("配置文件加载成功")
+}
+
+// saveConfigToFile 保存配置到文件
+func saveConfigToFile() {
+	cacheMutex.RLock()
+	config := configCache
+	cacheMutex.RUnlock()
+
+	// 转换为JSON
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		fmt.Printf("转换配置为JSON失败: %v\n", err)
+		return
+	}
+
+	// 写入文件
+	if err := ioutil.WriteFile(configFilePath, data, 0644); err != nil {
+		fmt.Printf("写入配置文件失败: %v\n", err)
+		return
+	}
+
+	fmt.Println("配置已保存到文件")
+}
+
+// SaveConfig 保存配置（增量更新）
 func SaveConfig(c *gin.Context) {
-	var config models.Config
-	if err := c.ShouldBindJSON(&config); err != nil {
+	var newConfig models.Config
+	if err := c.ShouldBindJSON(&newConfig); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	// 测试配置是否有效 - 验证凭证
-	larkService := services.NewLarkService(config.AppID, config.AppSecret)
+	larkService := services.NewLarkService(newConfig.AppID, newConfig.AppSecret)
 	err := larkService.ValidateCredentials()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "飞书配置无效: " + err.Error()})
 		return
 	}
 
-	// 保存配置到缓存
 	cacheMutex.Lock()
-	configCache = config
-	cacheMutex.Unlock()
+	defer cacheMutex.Unlock()
 
-	c.JSON(http.StatusOK, gin.H{"message": "配置保存成功"})
+	// 增量更新配置
+	// 1. 更新基础配置（AppID, AppSecret等）
+	configCache.AppID = newConfig.AppID
+	configCache.AppSecret = newConfig.AppSecret
+	configCache.GroupChatID = newConfig.GroupChatID
+
+	// 2. 增量更新表格配置
+	if newConfig.Tables != nil && len(newConfig.Tables) > 0 {
+		// 创建一个map用于快速查找现有表格
+		existingTables := make(map[string]bool)
+		for _, table := range configCache.Tables {
+			key := table.AppToken + "_" + table.TableID
+			existingTables[key] = true
+		}
+
+		// 添加新表格
+		for _, newTable := range newConfig.Tables {
+			key := newTable.AppToken + "_" + newTable.TableID
+			if !existingTables[key] {
+				// 这是一个新表格，添加到配置中
+				configCache.Tables = append(configCache.Tables, newTable)
+				fmt.Printf("添加新表格配置: %s\n", newTable.Name)
+			} else {
+				// 这是一个现有表格，更新配置
+				for i, existingTable := range configCache.Tables {
+					if existingTable.AppToken == newTable.AppToken && existingTable.TableID == newTable.TableID {
+						configCache.Tables[i] = newTable
+						fmt.Printf("更新表格配置: %s\n", newTable.Name)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// 保存配置到文件
+	go saveConfigToFile()
+
+	c.JSON(http.StatusOK, gin.H{"message": "配置保存成功", "config": configCache})
 }
 
 // GetConfig 获取配置
@@ -147,7 +243,7 @@ func AddRecord(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请先配置飞书应用信息"})
 		return
 	}
-	
+
 	// 输出当前配置信息（用于调试）
 	fmt.Printf("当前配置信息：\n")
 	fmt.Printf("- AppID: %s\n", config.AppID)
@@ -179,24 +275,24 @@ func AddRecord(c *gin.Context) {
 	// 				message += fmt.Sprintf("%s: %s\n", fieldName, v)
 	// 			case []interface{}:
 	// 				// 处理数组类型的值（如多选）
-				// 	message += fmt.Sprintf("%s: ", fieldName)
-				// 	for i, item := range v {
-				// 		if i > 0 {
-					// 		message += ", "
-					// 	}
-					// 	message += fmt.Sprintf("%v", item)
-				// 	}
-				// 	message += "\n"
-				// default:
-				// 	message += fmt.Sprintf("%s: %v\n", fieldName, v)
-				// }
-			// }
-			// message += "\n🔍 系统将持续监测指定字段，完成后会发送通知。"
-			// err = larkService.SendMessage(config.GroupChatID, message)
-			// if err != nil {
-			// 	fmt.Printf("发送初始消息失败: %v\n", err)
-			// }
-		// }()
+	// 	message += fmt.Sprintf("%s: ", fieldName)
+	// 	for i, item := range v {
+	// 		if i > 0 {
+	// 		message += ", "
+	// 	}
+	// 	message += fmt.Sprintf("%v", item)
+	// 	}
+	// 	message += "\n"
+	// default:
+	// 	message += fmt.Sprintf("%s: %v\n", fieldName, v)
+	// }
+	// }
+	// message += "\n🔍 系统将持续监测指定字段，完成后会发送通知。"
+	// err = larkService.SendMessage(config.GroupChatID, message)
+	// if err != nil {
+	// 	fmt.Printf("发送初始消息失败: %v\n", err)
+	// }
+	// }()
 	// }
 
 	// 支持新的多表格配置和旧的单表格配置
@@ -221,13 +317,13 @@ func AddRecord(c *gin.Context) {
 	if checkFields != nil && len(checkFields) > 0 {
 		go func() {
 			fmt.Printf("🔍 开始检测记录ID %s 的字段: %v\n", recordID, checkFields)
-			
+
 			// 等待10秒后开始检测，避免立即检测可能出现的数据同步延迟
-				time.Sleep(10 * time.Second)
-				
-				// 持续检测，直到所有指定字段都有数据
-				for {
-					completed, fieldValues, err := larkService.CheckFieldsCompleted(req.AppToken, req.TableID, recordID, checkFields)
+			time.Sleep(10 * time.Second)
+
+			// 持续检测，直到所有指定字段都有数据
+			for {
+				completed, fieldValues, err := larkService.CheckFieldsCompleted(req.AppToken, req.TableID, recordID, checkFields)
 				if err != nil {
 					fmt.Printf("❌ 检查字段状态失败: %v\n", err)
 					// 等待一段时间后重试
@@ -239,7 +335,7 @@ func AddRecord(c *gin.Context) {
 					// 所有字段都有数据了，打印字段值
 					fmt.Printf("✅ 记录ID %s 的指定字段已全部有数据！\n", recordID)
 					fmt.Printf("📋 字段数据：\n")
-					
+
 					// 准备发送消息的内容，将表格名称放在第一行
 					message := fmt.Sprintf("📊 表格：%s\n\n📢 记录ID %s 的指定字段已全部有数据！\n\n检测字段内容：\n", tableName, recordID)
 					for fieldName, value := range fieldValues {
@@ -336,7 +432,7 @@ func AddRecord(c *gin.Context) {
 							message += fmt.Sprintf("%s: %v\n", fieldName, v)
 						}
 					}
-					
+
 					// 发送消息
 					if config.GroupChatID != "" {
 						err = larkService.SendMessage(config.GroupChatID, message)
@@ -351,76 +447,16 @@ func AddRecord(c *gin.Context) {
 					for _, table := range config.Tables {
 						if table.AppToken == req.AppToken && table.TableID == req.TableID && table.CreateTask {
 							fmt.Printf("🔄 开始创建任务...\n")
-							
-							// 查找记录人字段（ui_type为User的字段）
-							var assigneeID string
-							var recordTime int64
-							
-							// 先从fieldValues中查找记录人
-							// 先从表格配置的write_fields中查找user类型的字段
-							for _, writeField := range table.WriteFields {
-								// 获取该字段的值
-								if value, exists := fieldValues[writeField.FieldName]; exists {
-									// 检查是否是用户类型字段
-									if userMap, ok := value.(map[string]interface{}); ok {
-										if id, ok := userMap["id"].(string); ok {
-											assigneeID = id
-											fmt.Printf("👤 找到记录人: %s\n", assigneeID)
-											break
-										}
-									}
-								}
-							}
 
-							// 如果没有找到记录人，尝试从所有字段中查找
-							if assigneeID == "" {
-								for _, value := range fieldValues {
-									if userMap, ok := value.(map[string]interface{}); ok {
-										if id, ok := userMap["id"].(string); ok {
-											assigneeID = id
-											fmt.Printf("👤 从所有字段中找到记录人: %s\n", assigneeID)
-											break
-										}
-									}
-								}
-							}
-							
-							// 如果仍然没有找到记录人，重新获取记录的所有字段
-							if assigneeID == "" {
-								fmt.Printf("🔍 尝试重新获取记录的所有字段...\n")
-								// 重新获取记录的所有字段
-								recordFields, err := larkService.GetRecord(req.AppToken, req.TableID, recordID)
-								if err != nil {
-									fmt.Printf("❌ 重新获取记录失败: %v\n", err)
-								} else {
-									// 从所有字段中查找记录人
-									for fieldName, value := range recordFields {
-										// 检查是否为单个用户格式
-										if userMap, ok := value.(map[string]interface{}); ok {
-											if id, ok := userMap["id"].(string); ok {
-												assigneeID = id
-												fmt.Printf("👤 从字段 '%s' 中找到记录人: %s\n", fieldName, assigneeID)
-												break
-											}
-										}
-										// 检查是否为用户数组格式
-										if userArray, ok := value.([]interface{}); ok && len(userArray) > 0 {
-											if firstUser, ok := userArray[0].(map[string]interface{}); ok {
-												if id, ok := firstUser["id"].(string); ok {
-													assigneeID = id
-													fmt.Printf("👤 从字段 '%s' 的用户数组中找到记录人: %s\n", fieldName, assigneeID)
-													break
-												}
-											}
-										}
-									}
-								}
-							}
-
-							// 获取任务标题
+							// 从配置的字段中获取任务信息
 							var taskTitle string
-							if summaryField := table.TaskSummaryField; summaryField != "" {
-								if value, exists := fieldValues[summaryField]; exists {
+							var dueTimestamp int64
+							var assignees []map[string]interface{}
+							var isAllDay bool = true
+
+							// 1. 获取任务标题
+							if table.TaskSummaryField != "" {
+								if value, exists := fieldValues[table.TaskSummaryField]; exists {
 									switch v := value.(type) {
 									case string:
 										taskTitle = v
@@ -444,14 +480,11 @@ func AddRecord(c *gin.Context) {
 							if taskTitle == "" {
 								taskTitle = "来自多维表格的任务"
 							}
+							fmt.Printf("📝 任务标题: %s\n", taskTitle)
 
-							// 如果找到记录人，创建任务
-							if assigneeID != "" {
-								// 设置默认截止时间为当前时间
-								defaultDue := time.Now().UnixMilli()
-								
-								// 尝试从字段值中获取截止时间
-								for fieldName, value := range fieldValues {
+							// 2. 获取任务截止时间
+							if table.TaskDueField != "" {
+								if value, exists := fieldValues[table.TaskDueField]; exists {
 									// 处理时间戳，支持int64和float64两种类型
 									var timestamp int64
 									switch v := value.(type) {
@@ -460,37 +493,93 @@ func AddRecord(c *gin.Context) {
 									case float64:
 										timestamp = int64(v)
 									default:
-										continue
-									}
-										
-									if timestamp > 0 && timestamp < 3250368000000 {
-										// 这看起来是一个有效的时间戳
-										recordTime = timestamp
-										fmt.Printf("⏰ 从字段 '%s' 中获取到截止时间：%d", fieldName, timestamp)
-										// 转换为东八区时间以便显示
-										t := time.Unix(timestamp/1000, 0).In(time.FixedZone("Asia/Shanghai", 8*3600))
-										fmt.Printf("📅 格式化时间：%s", t.Format("2006-01-02 15:04:05"))
 										break
 									}
-								}
 
-								// 如果没有找到有效的截止时间，使用默认值
-								dueTime := recordTime
-								if dueTime == 0 {
-									dueTime = defaultDue
+									if timestamp > 0 && timestamp < 3250368000000 {
+										// 这看起来是一个有效的时间戳
+										dueTimestamp = timestamp
+										// 转换为东八区时间以便显示
+										t := time.Unix(timestamp/1000, 0).In(time.FixedZone("Asia/Shanghai", 8*3600))
+										fmt.Printf("⏰ 任务截止时间: %s\n", t.Format("2006-01-02 15:04:05"))
+									}
 								}
+							}
 
-								// 创建任务
-								taskID, err := larkService.CreateTask(assigneeID, taskTitle, dueTime, false)
+							// 如果没有找到有效的截止时间，使用当前时间加1天
+							if dueTimestamp == 0 {
+								dueTimestamp = time.Now().Add(24 * time.Hour).UnixMilli()
+								fmt.Printf("⏰ 使用默认截止时间: 24小时后\n")
+							}
+
+							// 3. 获取任务负责人
+							if table.TaskAssigneeField != "" {
+								if value, exists := fieldValues[table.TaskAssigneeField]; exists {
+									// 处理单个用户
+									if userMap, ok := value.(map[string]interface{}); ok {
+										if id, ok := userMap["id"].(string); ok {
+											assignees = append(assignees, map[string]interface{}{
+												"id": id,
+											})
+											fmt.Printf("👤 任务负责人: %s\n", id)
+										}
+									} else if userArray, ok := value.([]interface{}); ok {
+										// 处理用户数组
+										for _, userItem := range userArray {
+											if userMap, ok := userItem.(map[string]interface{}); ok {
+												if id, ok := userMap["id"].(string); ok {
+													assignees = append(assignees, map[string]interface{}{
+														"id": id,
+													})
+													fmt.Printf("👤 任务负责人: %s\n", id)
+												}
+											}
+										}
+									}
+								}
+							}
+
+							// 如果没有配置任务负责人字段，尝试查找user类型的字段
+							if len(assignees) == 0 {
+								for _, value := range fieldValues {
+									// 处理单个用户
+									if userMap, ok := value.(map[string]interface{}); ok {
+										if id, ok := userMap["id"].(string); ok {
+											assignees = append(assignees, map[string]interface{}{
+												"id": id,
+											})
+											fmt.Printf("👤 自动找到任务负责人: %s\n", id)
+											break
+										}
+									} else if userArray, ok := value.([]interface{}); ok {
+										// 处理用户数组
+										for _, userItem := range userArray {
+											if userMap, ok := userItem.(map[string]interface{}); ok {
+												if id, ok := userMap["id"].(string); ok {
+													assignees = append(assignees, map[string]interface{}{
+														"id": id,
+													})
+													fmt.Printf("👤 自动找到任务负责人: %s\n", id)
+													break
+												}
+											}
+										}
+									}
+								}
+							}
+
+							// 创建任务
+							if len(assignees) > 0 {
+								err := larkService.CreateTask(taskTitle, dueTimestamp, isAllDay, assignees)
 								if err != nil {
 									fmt.Printf("❌ 创建任务失败: %v\n", err)
 								} else {
-									fmt.Printf("✅ 任务创建成功！任务ID: %s\n", taskID)
+									fmt.Printf("✅ 任务创建成功！\n")
 								}
 							} else {
-								fmt.Printf("⚠️ 未找到记录人信息，无法创建任务\n")
+								fmt.Printf("⚠️ 未找到任务负责人信息，无法创建任务\n")
 							}
-							
+
 							break
 						}
 					}
@@ -533,7 +622,7 @@ func CheckRecordStatus(c *gin.Context) {
 	}
 
 	larkService := services.NewLarkService(config.AppID, config.AppSecret)
-	
+
 	// 支持新的多表格配置和旧的单表格配置
 	var checkFields []string
 	if len(config.Tables) > 0 {
@@ -548,7 +637,7 @@ func CheckRecordStatus(c *gin.Context) {
 		// 旧格式：向后兼容
 		checkFields = config.CheckFields
 	}
-	
+
 	completed, _, err := larkService.CheckFieldsCompleted(appToken, tableID, recordID, checkFields)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

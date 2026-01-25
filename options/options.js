@@ -4,7 +4,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const appSecretInput = document.getElementById('appSecret');
     const testConfigBtn = document.getElementById('testConfig');
     const testResult = document.getElementById('testResult');
-    const useDefaultConfigBtn = document.getElementById('useDefaultConfig');
     
     const bitableSection = document.getElementById('bitableSection');
     const tableUrlsContainer = document.getElementById('tableUrlsContainer');
@@ -25,23 +24,12 @@ document.addEventListener('DOMContentLoaded', function() {
         group_chat_id: ''
     };
 
-    // 内置的默认配置
-    const DEFAULT_CONFIG = {
-        app_id: 'cli_a9d27bd8db78dbb4',
-        app_secret: 'swcvzxSrgtxMQsSr4YMyLfPdTnbbAibe'
-    };
+
 
     // 加载已保存的配置
     loadSavedConfig();
     
-    // 使用内置配置按钮
-    useDefaultConfigBtn.addEventListener('click', function() {
-        if (confirm('确定要使用内置的飞书应用配置吗？')) {
-            appIdInput.value = DEFAULT_CONFIG.app_id;
-            appSecretInput.value = DEFAULT_CONFIG.app_secret;
-            showTestResult('已加载内置配置，请点击“测试配置”验证', true);
-        }
-    });
+
 
     // 测试配置按钮
     testConfigBtn.addEventListener('click', async function() {
@@ -149,7 +137,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // 添加表格URL输入行
-    function addTableUrlRow(tableConfig = null) {
+    async function addTableUrlRow(tableConfig = null) {
         const rowId = Date.now();
         const row = document.createElement('div');
         row.className = 'table-url-row';
@@ -186,9 +174,41 @@ document.addEventListener('DOMContentLoaded', function() {
                     <label style="display: block; margin-bottom: 5px; font-weight: 500;">待写入字段（至少选一个）</label>
                     <div class="write-fields-list" style="max-height: 150px; overflow-y: auto; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;"></div>
                 </div>
-                <div>
+                <div style="margin-bottom: 10px;">
                     <label style="display: block; margin-bottom: 5px; font-weight: 500;">需检测的字段（选填）</label>
                     <div class="check-fields-list" style="max-height: 150px; overflow-y: auto; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; background: white;"></div>
+                </div>
+                <!-- 飞书任务配置 -->
+                <div style="margin-bottom: 10px; padding: 10px; background: #f3f4f6; border-radius: 6px;">
+                    <h4 style="margin-top: 0; margin-bottom: 10px; font-size: 14px; font-weight: 600;">飞书任务配置</h4>
+                    <div style="margin-bottom: 10px;">
+                        <label style="display: flex; align-items: center; cursor: pointer;">
+                            <input type="checkbox" class="create-task-checkbox" 
+                                   ${tableConfig?.create_task ? 'checked' : ''} 
+                                   style="margin-right: 8px; vertical-align: middle;">
+                            <span>记录数据时创建飞书任务</span>
+                        </label>
+                    </div>
+                    <div class="task-config-fields" style="margin-left: 24px; display: ${tableConfig?.create_task ? 'block' : 'none'};">
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">任务标题字段</label>
+                            <select class="task-summary-field-select" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                                <option value="">请选择字段</option>
+                            </select>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">任务截止日期字段</label>
+                            <select class="task-due-field-select" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                                <option value="">请选择字段</option>
+                            </select>
+                        </div>
+                        <div style="margin-bottom: 10px;">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">任务负责人字段</label>
+                            <select class="task-assignee-field-select" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                                <option value="">请选择字段</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="verification-status" style="margin-top: 10px; padding: 8px; border-radius: 6px; display: none;"></div>
@@ -210,9 +230,157 @@ document.addEventListener('DOMContentLoaded', function() {
         // 数据表选择变化时加载字段
         tableIdSelect.addEventListener('change', () => loadTableFields(row));
         
-        // 如果有初始配置，自动验证
+        // 创建任务复选框事件监听
+        const createTaskCheckbox = row.querySelector('.create-task-checkbox');
+        const taskConfigFields = row.querySelector('.task-config-fields');
+        createTaskCheckbox.addEventListener('change', () => {
+            taskConfigFields.style.display = createTaskCheckbox.checked ? 'block' : 'none';
+        });
+        
+        // 如果有初始配置，保存所有配置到dataset中
+        if (tableConfig) {
+            // 保存完整的表格配置
+            row.dataset.tableConfig = JSON.stringify(tableConfig);
+            
+            // 保存任务配置
+            if (tableConfig.task_summary_field) {
+                row.dataset.taskSummaryField = tableConfig.task_summary_field;
+            }
+            if (tableConfig.task_due_field) {
+                row.dataset.taskDueField = tableConfig.task_due_field;
+            }
+            if (tableConfig.task_assignee_field) {
+                row.dataset.taskAssigneeField = tableConfig.task_assignee_field;
+            }
+            
+            // 保存字段配置
+            if (tableConfig.write_fields) {
+                row.dataset.writeFields = JSON.stringify(tableConfig.write_fields);
+            }
+            if (tableConfig.check_fields) {
+                row.dataset.checkFields = JSON.stringify(tableConfig.check_fields);
+            }
+            
+            // 保存字段默认值
+            const writeFieldDefaults = {};
+            if (tableConfig.write_fields) {
+                tableConfig.write_fields.forEach(field => {
+                    if (field.default) {
+                        writeFieldDefaults[field.field_name] = field.default;
+                    }
+                });
+                if (Object.keys(writeFieldDefaults).length > 0) {
+                    row.dataset.writeFieldDefaults = JSON.stringify(writeFieldDefaults);
+                }
+            }
+        }
+        
+        // 如果有初始配置，自动显示表格详情并设置字段
         if (tableConfig?.url) {
-            setTimeout(() => verifyTableUrl(row), 100);
+            // 显示表格详情
+            const tableDetails = row.querySelector('.table-details');
+            if (tableDetails) {
+                tableDetails.style.display = 'block';
+            }
+            
+            // 设置验证状态为已验证
+            const statusDiv = row.querySelector('.verification-status');
+            if (statusDiv) {
+                showVerificationStatus(statusDiv, '✓ 配置已加载', true);
+            }
+            
+            // 设置应用Token和表格ID
+            row.dataset.appToken = tableConfig.app_token;
+            
+            // 设置表格ID选择
+            const tableIdSelect = row.querySelector('.table-id-select');
+            if (tableIdSelect && tableConfig.table_id) {
+                // 模拟加载表格列表
+                tableIdSelect.innerHTML = `<option value="${tableConfig.table_id}">${tableConfig.name || '表格'} (${tableConfig.table_id})</option>`;
+                tableIdSelect.value = tableConfig.table_id;
+                
+                // 加载字段并设置配置
+                try {
+                    const response = await fetch(
+                        `http://localhost:8080/api/bitables/fields?app_token=${tableConfig.app_token}&table_id=${tableConfig.table_id}`
+                    );
+                    const fields = await response.json();
+                    
+                    displayFieldsInRow(row, fields);
+                    
+                    // 设置写入字段
+                    const writeFields = tableConfig.write_fields.map(field => field.field_name);
+                    const writeFieldDefaults = {};
+                    tableConfig.write_fields.forEach(field => {
+                        if (field.default) {
+                            writeFieldDefaults[field.field_name] = field.default;
+                        }
+                    });
+                    
+                    const writeCheckboxes = row.querySelectorAll('.write-fields-list input[name="write_field"]');
+                    writeCheckboxes.forEach(checkbox => {
+                        const fieldName = checkbox.value;
+                        if (writeFields.includes(fieldName)) {
+                            checkbox.checked = true;
+                            // 显示默认值输入框
+                            const defaultInput = checkbox.parentElement.nextElementSibling;
+                            if (defaultInput) {
+                                defaultInput.style.display = 'inline-block';
+                                // 设置默认值
+                                if (writeFieldDefaults[fieldName]) {
+                                    defaultInput.value = writeFieldDefaults[fieldName];
+                                }
+                            }
+                        }
+                    });
+                    
+                    // 设置检查字段
+                    const checkFields = tableConfig.check_fields;
+                    const checkCheckboxes = row.querySelectorAll('.check-fields-list input[name="check_field"]');
+                    checkCheckboxes.forEach(checkbox => {
+                        const fieldName = checkbox.value;
+                        if (checkFields.includes(fieldName)) {
+                            checkbox.checked = true;
+                        }
+                    });
+                    
+                    // 设置任务配置字段
+                    if (tableConfig.create_task) {
+                        const taskSummarySelect = row.querySelector('.task-summary-field-select');
+                        const taskDueSelect = row.querySelector('.task-due-field-select');
+                        const taskAssigneeSelect = row.querySelector('.task-assignee-field-select');
+                        
+                        // 添加所有字段作为选项
+                        fields.forEach(field => {
+                            const option1 = document.createElement('option');
+                            option1.value = field.field_name;
+                            option1.textContent = field.field_name;
+                            if (field.field_name === tableConfig.task_summary_field) {
+                                option1.selected = true;
+                            }
+                            taskSummarySelect.appendChild(option1);
+                            
+                            const option2 = document.createElement('option');
+                            option2.value = field.field_name;
+                            option2.textContent = field.field_name;
+                            if (field.field_name === tableConfig.task_due_field) {
+                                option2.selected = true;
+                            }
+                            taskDueSelect.appendChild(option2);
+                            
+                            const option3 = document.createElement('option');
+                            option3.value = field.field_name;
+                            option3.textContent = field.field_name;
+                            if (field.field_name === tableConfig.task_assignee_field) {
+                                option3.selected = true;
+                            }
+                            taskAssigneeSelect.appendChild(option3);
+                        });
+                    }
+                } catch (error) {
+                    console.error('加载字段失败:', error);
+                }
+            }
         }
         
         return row;
@@ -259,6 +427,8 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // 显示数据表列表（现在包含table_id和table_name）
             const tableIdSelect = row.querySelector('.table-id-select');
+            const tableNameInput = row.querySelector('.table-name-input');
+            
             tableIdSelect.innerHTML = '<option value="">请选择数据表</option>';
             result.forEach(table => {
                 const option = document.createElement('option');
@@ -266,6 +436,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 option.textContent = table.name ? `${table.name} (${table.table_id})` : `表格 ${table.table_id}`;
                 tableIdSelect.appendChild(option);
             });
+            
+            // 设置默认表格名称为多维表格的名称
+            if (result.length > 0 && !tableNameInput.value) {
+                // 如果只有一个数据表，直接使用该表名
+                // 如果有多个数据表，使用第一个表名作为默认值
+                tableNameInput.value = result[0].name || `表格 ${tables.length + 1}`;
+            }
             
             // 保存原始URL中的table ID
             if (urlTableId) {
@@ -287,7 +464,50 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // 自动加载当前选中的数据表字段
             if (tableIdSelect.value) {
-                loadTableFields(row);
+                await loadTableFields(row);
+                
+                // 加载字段后，恢复保存的字段配置
+                if (row.dataset.tableConfig) {
+                    const tableConfig = JSON.parse(row.dataset.tableConfig);
+                    
+                    setTimeout(() => {
+                        // 设置写入字段
+                        const writeFields = tableConfig.write_fields.map(field => field.field_name);
+                        const writeFieldDefaults = {};
+                        tableConfig.write_fields.forEach(field => {
+                            if (field.default) {
+                                writeFieldDefaults[field.field_name] = field.default;
+                            }
+                        });
+                        
+                        const writeCheckboxes = row.querySelectorAll('.write-fields-list input[name="write_field"]');
+                        writeCheckboxes.forEach(checkbox => {
+                            const fieldName = checkbox.value;
+                            if (writeFields.includes(fieldName)) {
+                                checkbox.checked = true;
+                                // 显示默认值输入框
+                                const defaultInput = checkbox.parentElement.nextElementSibling;
+                                if (defaultInput) {
+                                    defaultInput.style.display = 'inline-block';
+                                    // 设置默认值
+                                    if (writeFieldDefaults[fieldName]) {
+                                        defaultInput.value = writeFieldDefaults[fieldName];
+                                    }
+                                }
+                            }
+                        });
+                        
+                        // 设置检查字段
+                        const checkFields = tableConfig.check_fields;
+                        const checkCheckboxes = row.querySelectorAll('.check-fields-list input[name="check_field"]');
+                        checkCheckboxes.forEach(checkbox => {
+                            const fieldName = checkbox.value;
+                            if (checkFields.includes(fieldName)) {
+                                checkbox.checked = true;
+                            }
+                        });
+                    }, 50);
+                }
             }
             
             row.dataset.appToken = appToken;
@@ -333,25 +553,59 @@ document.addEventListener('DOMContentLoaded', function() {
         const writeFieldsList = row.querySelector('.write-fields-list');
         const checkFieldsList = row.querySelector('.check-fields-list');
         
+        // 获取任务配置的字段选择下拉框
+        const taskSummaryFieldSelect = row.querySelector('.task-summary-field-select');
+        const taskDueFieldSelect = row.querySelector('.task-due-field-select');
+        const taskAssigneeFieldSelect = row.querySelector('.task-assignee-field-select');
+        
         writeFieldsList.innerHTML = '';
         checkFieldsList.innerHTML = '';
+        
+        // 清空并重新填充任务字段选择下拉框
+        [taskSummaryFieldSelect, taskDueFieldSelect, taskAssigneeFieldSelect].forEach(select => {
+            if (select) {
+                select.innerHTML = '<option value="">请选择字段</option>';
+            }
+        });
+        
+        // 从row.dataset中获取保存的配置
+        const savedWriteFields = row.dataset.writeFields ? JSON.parse(row.dataset.writeFields) : [];
+        const savedWriteFieldNames = savedWriteFields.map(field => field.field_name);
+        const savedWriteFieldDefaults = {};
+        savedWriteFields.forEach(field => {
+            if (field.default) {
+                savedWriteFieldDefaults[field.field_name] = field.default;
+            }
+        });
+        
+        const savedCheckFields = row.dataset.checkFields ? JSON.parse(row.dataset.checkFields) : [];
         
         fields.forEach(field => {
             // 检查是否为必填字段，如果是则默认勾选
             const isPrimary = field.is_primary === true;
+            // 对于ui_type为user的字段，默认为必选
+            const isUserType = (field.ui_type || '').toLowerCase() === 'user';
+            
+            // 优先使用保存的配置，否则使用默认值
+            const isWriteFieldChecked = savedWriteFieldNames.includes(field.field_name);
+            const isCheckFieldChecked = savedCheckFields.includes(field.field_name);
+            const defaultChecked = isWriteFieldChecked || isPrimary || isUserType;
+            const checkDefaultChecked = isCheckFieldChecked || isPrimary || isUserType;
             
             const writeItem = document.createElement('div');
             writeItem.style.cssText = 'margin-bottom: 5px; display: flex; align-items: center;';
             writeItem.innerHTML = `
                 <label style="display: flex; align-items: center; cursor: pointer; flex: 1;">
                     <input type="checkbox" name="write_field" value="${field.field_name}" 
-                           ${isPrimary ? 'checked' : ''} style="margin-right: 8px;">
-                    <span>${field.field_name} (${field.field_type}, ${field.ui_type || '未知'})${isPrimary ? ' *' : ''}</span>
+                           data-ui-type="${field.ui_type || ''}" 
+                           ${defaultChecked ? 'checked' : ''} style="margin-right: 8px;">
+                    <span>${field.field_name} (${field.field_type}, ${field.ui_type || '未知'})${isPrimary ? ' *' : ''}${isUserType ? ' 🧑' : ''}</span>
                 </label>
                 <input type="text" name="write_field_default" 
                        data-field="${field.field_name}" 
                        placeholder="默认值（可选）" 
-                       style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; display: none; margin-left: 10px; width: 150px;">
+                       value="${savedWriteFieldDefaults[field.field_name] || ''}"
+                       style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px; display: ${defaultChecked ? 'inline-block' : 'none'}; margin-left: 10px; width: 150px;">
             `;
             writeFieldsList.appendChild(writeItem);
             
@@ -362,22 +616,51 @@ document.addEventListener('DOMContentLoaded', function() {
                 writeDefaultInput.style.display = writeCheckbox.checked ? 'inline-block' : 'none';
             });
             
-            // 初始状态下，如果勾选了则显示输入框
-            if (writeCheckbox.checked) {
-                writeDefaultInput.style.display = 'inline-block';
-            }
-            
             const checkItem = document.createElement('div');
             checkItem.style.cssText = 'margin-bottom: 5px; display: flex; align-items: center;';
             checkItem.innerHTML = `
                 <label style="display: flex; align-items: center; cursor: pointer; flex: 1;">
                     <input type="checkbox" name="check_field" value="${field.field_name}" 
-                           ${isPrimary ? 'checked' : ''} style="margin-right: 8px;">
-                    <span>${field.field_name} (${field.field_type}, ${field.ui_type || '未知'})${isPrimary ? ' *' : ''}</span>
+                           ${checkDefaultChecked ? 'checked' : ''} style="margin-right: 8px;">
+                    <span>${field.field_name} (${field.field_type}, ${field.ui_type || '未知'})${isPrimary ? ' *' : ''}${isUserType ? ' 🧑' : ''}</span>
                 </label>
             `;
             checkFieldsList.appendChild(checkItem);
+            
+            // 更新任务配置的字段选择下拉框
+            if (taskSummaryFieldSelect) {
+                const option = document.createElement('option');
+                option.value = field.field_name;
+                option.textContent = `${field.field_name} (${field.field_type})`;
+                taskSummaryFieldSelect.appendChild(option);
+            }
+            
+            if (taskDueFieldSelect) {
+                const option = document.createElement('option');
+                option.value = field.field_name;
+                option.textContent = `${field.field_name} (${field.field_type})`;
+                taskDueFieldSelect.appendChild(option);
+            }
+            
+            if (taskAssigneeFieldSelect) {
+                const option = document.createElement('option');
+                option.value = field.field_name;
+                option.textContent = `${field.field_name} (${field.field_type})`;
+                taskAssigneeFieldSelect.appendChild(option);
+            }
         });
+        
+        // 如果当前行有任务配置，设置默认选中
+        const rowData = row.dataset;
+        if (rowData.taskSummaryField) {
+            taskSummaryFieldSelect.value = rowData.taskSummaryField;
+        }
+        if (rowData.taskDueField) {
+            taskDueFieldSelect.value = rowData.taskDueField;
+        }
+        if (rowData.taskAssigneeField) {
+            taskAssigneeFieldSelect.value = rowData.taskAssigneeField;
+        }
     }
 
     // 显示验证状态
@@ -444,6 +727,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const writeFields = [];
                 row.querySelectorAll('.write-fields-list input[type="checkbox"]:checked').forEach(cb => {
                     const fieldName = cb.value;
+                    const uiType = cb.dataset.uiType || '';
                     
                     // 获取默认值
                     const defaultInput = row.querySelector(`input[name="write_field_default"][data-field="${fieldName}"]`);
@@ -451,6 +735,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     
                     writeFields.push({
                         field_name: fieldName,
+                        ui_type: uiType,
                         default: defaultValue
                     });
                 });
@@ -465,13 +750,30 @@ document.addEventListener('DOMContentLoaded', function() {
                     checkFields.push(cb.value);
                 });
                 
+                // 获取任务配置
+                const createTaskCheckbox = row.querySelector('.create-task-checkbox');
+                const createTask = createTaskCheckbox ? createTaskCheckbox.checked : false;
+                
+                const taskSummaryFieldSelect = row.querySelector('.task-summary-field-select');
+                const taskSummaryField = taskSummaryFieldSelect ? taskSummaryFieldSelect.value : '';
+                
+                const taskDueFieldSelect = row.querySelector('.task-due-field-select');
+                const taskDueField = taskDueFieldSelect ? taskDueFieldSelect.value : '';
+                
+                const taskAssigneeFieldSelect = row.querySelector('.task-assignee-field-select');
+                const taskAssigneeField = taskAssigneeFieldSelect ? taskAssigneeFieldSelect.value : '';
+                
                 tables.push({
                     url: url,
                     app_token: appToken,
                     table_id: tableId,
                     name: tableName || `表格 ${tables.length + 1}`,
                     write_fields: writeFields,
-                    check_fields: checkFields
+                    check_fields: checkFields,
+                    create_task: createTask,
+                    task_summary_field: taskSummaryField,
+                    task_due_field: taskDueField,
+                    task_assignee_field: taskAssigneeField
                 });
             }
             
@@ -531,7 +833,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div style="margin-bottom: 15px; padding: 10px; background: #f3f4f6; border-radius: 6px;">
                         <strong>表格 ${index + 1}: ${table.name}</strong><br>
                         <small>数据表ID: ${table.table_id}</small><br>
-                        <small>待写入字段: ${table.write_fields.join(', ')}</small><br>
+                        <small>待写入字段: ${table.write_fields.map(field => field.field_name).join(', ')}</small><br>
                         ${table.check_fields.length > 0 ? `<small>检测字段: ${table.check_fields.join(', ')}</small>` : ''}
                     </div>
                 `;
@@ -560,15 +862,22 @@ document.addEventListener('DOMContentLoaded', function() {
     // 加载已保存的配置
     async function loadSavedConfig() {
         try {
-            const result = await chrome.storage.local.get('larkConfig');
-            if (result.larkConfig) {
-                const config = result.larkConfig;
+            // 优先从后端获取最新配置
+            const response = await fetch('http://localhost:8080/api/config', {
+                method: 'GET'
+            });
+            
+            if (response.ok) {
+                const config = await response.json();
                 
                 appIdInput.value = config.app_id || '';
                 appSecretInput.value = config.app_secret || '';
                 groupChatIdInput.value = config.group_chat_id || '';
                 
                 currentConfigData = config;
+                
+                // 将配置保存到本地存储作为备份
+                await chrome.storage.local.set({ larkConfig: config });
                 
                 displayCurrentConfig(config);
                 
@@ -577,16 +886,57 @@ document.addEventListener('DOMContentLoaded', function() {
                     messageSection.style.display = 'block';
                     
                     if (config.tables && config.tables.length > 0) {
-                        config.tables.forEach(table => {
-                            addTableUrlRow(table);
-                        });
+                        // 清空现有表格行
+                        tableUrlsContainer.innerHTML = '';
+                        // 添加所有已配置的表格
+                        for (const table of config.tables) {
+                            await addTableUrlRow(table);
+                        }
                     } else {
-                        addTableUrlRow();
+                        // 如果没有表格配置，添加一个空行
+                        await addTableUrlRow();
                     }
+                }
+            } else {
+                // 如果后端获取失败，尝试从本地存储加载
+                const result = await chrome.storage.local.get('larkConfig');
+                if (result.larkConfig) {
+                    const config = result.larkConfig;
+                    
+                    appIdInput.value = config.app_id || '';
+                    appSecretInput.value = config.app_secret || '';
+                    groupChatIdInput.value = config.group_chat_id || '';
+                    
+                    currentConfigData = config;
+                    
+                    displayCurrentConfig(config);
+                    
+                    if (config.app_id && config.app_secret) {
+                        bitableSection.style.display = 'block';
+                        messageSection.style.display = 'block';
+                        
+                        if (config.tables && config.tables.length > 0) {
+                            // 清空现有表格行
+                            tableUrlsContainer.innerHTML = '';
+                            // 添加所有已配置的表格
+                            config.tables.forEach(table => {
+                                addTableUrlRow(table);
+                            });
+                        } else {
+                            addTableUrlRow();
+                        }
+                    }
+                } else {
+                    // 如果本地存储也没有配置，添加一个空行
+                    addTableUrlRow();
                 }
             }
         } catch (error) {
             console.error('加载配置失败:', error);
+            // 加载失败时，至少添加一个空行
+            if (tableUrlsContainer.children.length === 0) {
+                addTableUrlRow();
+            }
         }
     }
 });
