@@ -22,6 +22,18 @@ var cacheMutex sync.RWMutex
 // 配置文件路径 - 使用相对路径
 const configFilePath = "./config.json"
 
+// AIParseRequest AI解析请求
+type AIParseRequest struct {
+	Content        string `json:"content"`
+	BaseFieldValue string `json:"base_field_value"`
+	Prompt         string `json:"prompt"`
+}
+
+// AIParseResponse AI解析响应
+type AIParseResponse struct {
+	Result string `json:"result"`
+}
+
 // 初始化配置 - 从文件加载
 func init() {
 	loadConfigFromFile()
@@ -100,6 +112,8 @@ func SaveConfig(c *gin.Context) {
 	configCache.AppID = newConfig.AppID
 	configCache.AppSecret = newConfig.AppSecret
 	configCache.GroupChatID = newConfig.GroupChatID
+	// 更新SiliconFlow配置
+	configCache.SiliconFlow = newConfig.SiliconFlow
 
 	// 2. 增量更新表格配置
 	if newConfig.Tables != nil && len(newConfig.Tables) > 0 {
@@ -599,6 +613,80 @@ func AddRecord(c *gin.Context) {
 		"message":  "记录添加成功",
 		"recordID": recordID,
 	})
+}
+
+// GetAIModels 获取可用的AI模型列表
+func GetAIModels(c *gin.Context) {
+	cacheMutex.RLock()
+	config := configCache
+	cacheMutex.RUnlock()
+
+	// 验证配置
+	if config.SiliconFlow.ApiKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "SiliconFlow API key not configured"})
+		return
+	}
+
+	// 创建AI服务实例
+	aiService := services.NewAIService(&config.SiliconFlow)
+
+	// 获取模型列表
+	models, err := aiService.GetModels()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"models": models})
+}
+
+// AIParse 使用AI解析内容
+func AIParse(c *gin.Context) {
+	startTime := time.Now()
+	defer func() {
+		elapsed := time.Since(startTime)
+		fmt.Printf("[AIParse] 请求处理总耗时: %v\n", elapsed)
+	}()
+
+	cacheMutex.RLock()
+	config := configCache
+	cacheMutex.RUnlock()
+
+	// 验证配置
+	if config.SiliconFlow.ApiKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "SiliconFlow API key not configured"})
+		return
+	}
+
+	// 解析请求
+	var req AIParseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fmt.Printf("[AIParse] 请求解析失败: %v\n", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	fmt.Printf("[AIParse] 解析到的请求参数: %+v\n", req)
+
+	// 创建AI服务实例
+	aiService := services.NewAIService(&config.SiliconFlow)
+
+	// 调用AI解析
+	content := req.Content
+	if content == "" {
+		content = req.BaseFieldValue
+	}
+
+	fmt.Printf("[AIParse] 调用AI服务，输入内容: %s\n", content)
+	result, err := aiService.ParseWithAI(content, req.Prompt)
+	if err != nil {
+		fmt.Printf("[AIParse] AI解析失败: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	fmt.Printf("[AIParse] AI解析成功，结果: %s\n", result)
+	c.JSON(http.StatusOK, AIParseResponse{Result: result})
 }
 
 // CheckRecordStatus 检查记录状态

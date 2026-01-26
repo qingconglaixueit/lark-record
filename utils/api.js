@@ -78,3 +78,11 @@ async function addRecord(recordData) {
 async function checkRecordStatus(appToken, tableId, recordId) {
     return fetch(`${API_BASE_URL}/records/check?app_token=${appToken}&table_id=${tableId}&record_id=${recordId}`);
 }
+
+/**
+ * 获取AI模型列表
+ * @returns {Promise<Response>}
+ */
+async function getAIModels() {
+    return fetch(`${API_BASE_URL}/ai/models`);
+}

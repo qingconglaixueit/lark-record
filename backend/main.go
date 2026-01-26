@@ -189,6 +189,11 @@ func main() {
 		// 记录操作
 		api.POST("/records", handlers.AddRecord)
 		api.GET("/records/check", handlers.CheckRecordStatus)
+
+		// AI解析
+		api.POST("/ai/parse", handlers.AIParse)
+		// 获取AI模型列表
+		api.GET("/ai/models", handlers.GetAIModels)
 	}
 
 	// 启动服务器

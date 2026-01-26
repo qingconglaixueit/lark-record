@@ -60,7 +60,7 @@ fi
 
 # 复制配置文件到dist目录
 echo "正在复制配置文件到dist目录..."
-cp config.json ../dist/ 2>/dev/null || true
+cp backend/config.json ../dist/ 2>/dev/null || true
 
 # 返回根目录
 cd ..
@@ -81,7 +81,7 @@ cp -r options dist/chrome-extension/
 cp -r styles dist/chrome-extension/
 cp -r utils dist/chrome-extension/
 cp -r icons dist/chrome-extension/
-cp config.json dist/chrome-extension/ 2>/dev/null || true
+cp backend/config.json dist/chrome-extension/ 2>/dev/null || true
 
 # 打包成zip文件
 cd dist

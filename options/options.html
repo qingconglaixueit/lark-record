@@ -27,6 +27,27 @@
             <span id="testResult"></span>
         </div>
 
+        <!-- AI解析配置 -->
+        <div class="section">
+            <h2>2. AI解析配置</h2>
+
+            <div class="form-group">
+                <label for="siliconFlowApiKey">SiliconFlow API Key</label>
+                <input type="password" id="siliconFlowApiKey" placeholder="sk-xxxxxxxxxxxxxxxx">
+                <small class="help-text">用于调用AI解析服务的API密钥</small>
+            </div>
+            <div class="form-group">
+                <label for="siliconFlowModel">AI模型</label>
+                <input type="text" id="siliconFlowModel" value="Qwen/Qwen2.5-7B-Instruct" placeholder="输入模型名称，例如：Qwen/Qwen2.5-7B-Instruct">
+                <small class="help-text">输入用于解析的AI模型名称</small>
+            </div>
+            <div class="form-group">
+                <label for="siliconFlowDefaultPrompt">默认提示词</label>
+                <textarea id="siliconFlowDefaultPrompt" rows="4" placeholder="请解析以下内容，提取关键信息并整理成结构化格式：\n\n{content}"></textarea>
+                <small class="help-text">{content} 将被替换为实际的输入内容</small>
+            </div>
+        </div>
+
         <!-- 多维表格配置 -->
         <div class="section" id="bitableSection" style="display: none;">
             <h2>2. 配置多维表格</h2>

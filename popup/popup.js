@@ -181,8 +181,129 @@ document.addEventListener('DOMContentLoaded', function() {
 
             fieldDiv.appendChild(label);
             fieldDiv.appendChild(input);
+            
+            // 检查是否为配置了AI解析的字段
+            if (selectedTable && selectedTable.ai_parse && selectedTable.ai_parse.enabled) {
+                const aiParseConfig = selectedTable.ai_parse;
+                
+                // 如果当前字段是AI解析的结果字段，添加解析按钮
+                if (aiParseConfig && aiParseConfig.result_field === fieldName) {
+                    const parseBtn = document.createElement('button');
+                    parseBtn.className = 'btn-ai-parse';
+                    parseBtn.textContent = '🤖 自动解析';
+                    parseBtn.style.cssText = 'margin-top: 8px; padding: 4px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;';
+                    
+                    // 添加解析按钮的点击事件
+                    parseBtn.addEventListener('click', async () => {
+                        await handleAIParse(aiParseConfig);
+                    });
+                    
+                    fieldDiv.appendChild(parseBtn);
+                }
+            }
+            
             inputFields.appendChild(fieldDiv);
         });
+    }
+    
+    // 处理AI解析
+    async function handleAIParse(aiParseConfig) {
+        try {
+            // 检查AI解析配置是否完整
+            if (!aiParseConfig || !aiParseConfig.enabled || !aiParseConfig.base_field || aiParseConfig.base_field.length === 0 || !aiParseConfig.result_field) {
+                showSubmitResult('AI解析配置不完整', false);
+                return;
+            }
+            
+            // 组装所有基于字段的内容
+            let baseFieldValue = '';
+            let hasEmptyField = false;
+            let firstEmptyField = null;
+            
+            for (const fieldName of aiParseConfig.base_field) {
+                // 查找基于的字段输入框
+                const baseFieldInput = inputFields.querySelector(`[data-field-name="${fieldName}"]`);
+                if (!baseFieldInput) {
+                    showSubmitResult(`未找到基于的字段: ${fieldName}`, false);
+                    return;
+                }
+                
+                const fieldValue = baseFieldInput.value.trim();
+                if (!fieldValue) {
+                    hasEmptyField = true;
+                    if (!firstEmptyField) {
+                        firstEmptyField = baseFieldInput;
+                    }
+                    continue;
+                }
+                
+                // 组装字段内容，使用字段名作为标题
+                baseFieldValue += `### ${fieldName}\n${fieldValue}\n\n`;
+            }
+            
+            if (hasEmptyField) {
+                showSubmitResult('请先填写所有基于的字段内容', false);
+                if (firstEmptyField) {
+                    firstEmptyField.focus();
+                }
+                return;
+            }
+            
+            if (!baseFieldValue) {
+                showSubmitResult('请先填写基于的字段内容', false);
+                return;
+            }
+            
+            // 查找结果字段输入框
+            const resultFieldInput = inputFields.querySelector(`[data-field-name="${aiParseConfig.result_field}"]`);
+            if (!resultFieldInput) {
+                showSubmitResult('未找到结果字段', false);
+                return;
+            }
+            
+            // 显示加载状态
+            const parseBtn = resultFieldInput.parentElement.querySelector('.btn-ai-parse');
+            if (parseBtn) {
+                parseBtn.disabled = true;
+                parseBtn.textContent = '解析中...';
+            }
+            
+            // 构建请求数据
+            const requestData = {
+                base_field_value: baseFieldValue.trim(),
+                prompt: aiParseConfig.prompt
+            };
+            
+            // 调用AI解析API
+            const response = await fetch('http://localhost:8080/api/ai/parse', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            const result = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(result.error || '解析失败');
+            }
+            
+            // 更新结果字段
+            resultFieldInput.value = result.result;
+            showSubmitResult('解析成功！', true);
+            
+        } catch (error) {
+            console.error('AI解析失败:', error);
+            showSubmitResult('解析失败: ' + error.message, false);
+        } finally {
+            // 恢复按钮状态
+            const parseBtn = inputFields.querySelector('.btn-ai-parse');
+            if (parseBtn) {
+                parseBtn.disabled = false;
+                parseBtn.textContent = '🤖 自动解析';
+            }
+        }
     }
 
     // 提交记录

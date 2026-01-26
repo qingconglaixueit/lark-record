@@ -5,6 +5,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const testConfigBtn = document.getElementById('testConfig');
     const testResult = document.getElementById('testResult');
     
+    // AI解析配置元素
+    const siliconFlowApiKeyInput = document.getElementById('siliconFlowApiKey');
+    const siliconFlowModelInput = document.getElementById('siliconFlowModel');
+    const siliconFlowDefaultPromptTextarea = document.getElementById('siliconFlowDefaultPrompt');
+    
     const bitableSection = document.getElementById('bitableSection');
     const tableUrlsContainer = document.getElementById('tableUrlsContainer');
     const addTableUrlBtn = document.getElementById('addTableUrl');
@@ -21,7 +26,12 @@ document.addEventListener('DOMContentLoaded', function() {
         app_id: '',
         app_secret: '',
         tables: [],
-        group_chat_id: ''
+        group_chat_id: '',
+        silicon_flow: {
+            api_key: '',
+            model: 'Qwen/Qwen2.5-7B-Instruct',
+            default_prompt: '请解析以下内容，提取关键信息并整理成结构化格式：\n\n{content}'
+        }
     };
 
 
@@ -144,7 +154,19 @@ document.addEventListener('DOMContentLoaded', function() {
         row.dataset.rowId = rowId;
         row.style.cssText = 'margin-bottom: 15px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 8px; background: #f9fafb;';
         
+        // 默认展开或折叠状态
+        const isExpanded = tableConfig?.url ? true : false;
+        const expandIcon = isExpanded ? '▼' : '▶';
+        
         row.innerHTML = `
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                <div style="font-weight: 600; color: #374151; font-size: 14px;">
+                    多维表格配置 ${document.querySelectorAll('.table-url-row').length + 1}
+                </div>
+                <button class="toggle-details-btn btn btn-secondary" style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 12px;">
+                    ${expandIcon} ${isExpanded ? '折叠配置' : '展开配置'}
+                </button>
+            </div>
             <div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px;">
                 <input type="text" 
                        class="table-url-input" 
@@ -158,7 +180,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     ✕ 删除
                 </button>
             </div>
-            <div class="table-details" style="display: none;">
+            <div class="table-details" style="display: ${isExpanded ? 'block' : 'none'};">
                 <div style="margin-bottom: 10px;">
                     <label style="display: block; margin-bottom: 5px; font-weight: 500;">表格名称</label>
                     <input type="text" class="table-name-input" placeholder="表格名称（选填）" value="${tableConfig?.name || ''}"
@@ -209,6 +231,35 @@ document.addEventListener('DOMContentLoaded', function() {
                             </select>
                         </div>
                     </div>
+                    
+                    <!-- AI解析配置 -->
+                    <div style="margin-top: 20px;">
+                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                            <label style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500;">
+                                <input type="checkbox" class="ai-parse-checkbox" value="true" ${tableConfig?.ai_parse?.enabled ? 'checked' : ''}> 
+                                启用AI解析功能
+                            </label>
+                        </div>
+                        <div class="ai-parse-config" style="margin-top: 10px; padding: 10px; background: #f9fafb; border-radius: 4px; display: ${tableConfig?.ai_parse?.enabled ? 'block' : 'none'};">
+                            <div style="margin-bottom: 10px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">基于的字段</label>
+                                <select class="ai-parse-base-field-select" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                                    <option value="">请选择（基于此字段进行AI解析）</option>
+                                </select>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">结果字段</label>
+                                <select class="ai-parse-result-field-select" style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                                    <option value="">请选择（AI解析结果写入此字段）</option>
+                                </select>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">提示词</label>
+                                <textarea class="ai-parse-prompt" placeholder="请输入AI解析的提示词..." style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; min-height: 80px; resize: vertical;">${tableConfig?.ai_parse?.prompt || '请基于以下内容进行解析和处理：{content}'}</textarea>
+                                <small style="margin-top: 5px; color: #6b7280; font-size: 12px; display: block;">使用 {content} 作为基于字段内容的占位符</small>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="verification-status" style="margin-top: 10px; padding: 8px; border-radius: 6px; display: none;"></div>
@@ -216,10 +267,12 @@ document.addEventListener('DOMContentLoaded', function() {
         
         tableUrlsContainer.appendChild(row);
         
-        // 绑定事件
+        // 获取DOM元素
         const verifyBtn = row.querySelector('.verify-table-btn');
         const removeBtn = row.querySelector('.remove-table-btn');
+        const toggleBtn = row.querySelector('.toggle-details-btn');
         const tableIdSelect = row.querySelector('.table-id-select');
+        const tableDetails = row.querySelector('.table-details');
         
         // 验证按钮
         verifyBtn.addEventListener('click', () => verifyTableUrl(row));
@@ -237,6 +290,13 @@ document.addEventListener('DOMContentLoaded', function() {
             taskConfigFields.style.display = createTaskCheckbox.checked ? 'block' : 'none';
         });
         
+        // AI解析复选框事件监听
+        const aiParseCheckbox = row.querySelector('.ai-parse-checkbox');
+        const aiParseConfig = row.querySelector('.ai-parse-config');
+        aiParseCheckbox.addEventListener('change', () => {
+            aiParseConfig.style.display = aiParseCheckbox.checked ? 'block' : 'none';
+        });
+        
         // 如果有初始配置，保存所有配置到dataset中
         if (tableConfig) {
             // 保存完整的表格配置
@@ -251,6 +311,15 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             if (tableConfig.task_assignee_field) {
                 row.dataset.taskAssigneeField = tableConfig.task_assignee_field;
+            }
+            
+            // 保存AI解析配置
+            if (tableConfig.ai_parse) {
+                row.dataset.aiParseEnabled = tableConfig.ai_parse.enabled ? 'true' : 'false';
+                // 处理base_field数组，取第一个元素（因为现在是单选）
+                row.dataset.aiParseBaseField = Array.isArray(tableConfig.ai_parse.base_field) && tableConfig.ai_parse.base_field.length > 0 ? tableConfig.ai_parse.base_field[0] : '';
+                row.dataset.aiParseResultField = tableConfig.ai_parse.result_field;
+                row.dataset.aiParsePrompt = tableConfig.ai_parse.prompt;
             }
             
             // 保存字段配置
@@ -275,13 +344,15 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        // 如果有初始配置，自动显示表格详情并设置字段
+        // 绑定展开/收缩按钮事件
+        toggleBtn.addEventListener('click', () => {
+            const isExpanded = tableDetails.style.display === 'block';
+            tableDetails.style.display = isExpanded ? 'none' : 'block';
+            toggleBtn.innerHTML = isExpanded ? '▶ 展开' : '▼ 折叠';
+        });
+        
+        // 如果有初始配置，自动设置表格详情并设置字段
         if (tableConfig?.url) {
-            // 显示表格详情
-            const tableDetails = row.querySelector('.table-details');
-            if (tableDetails) {
-                tableDetails.style.display = 'block';
-            }
             
             // 设置验证状态为已验证
             const statusDiv = row.querySelector('.verification-status');
@@ -375,6 +446,31 @@ document.addEventListener('DOMContentLoaded', function() {
                                 option3.selected = true;
                             }
                             taskAssigneeSelect.appendChild(option3);
+                        });
+                    }
+                    
+                    // 设置AI解析配置字段
+                    if (tableConfig.ai_parse && tableConfig.ai_parse.enabled) {
+                        const aiParseBaseFieldSelect = row.querySelector('.ai-parse-base-field-select');
+                        const aiParseResultFieldSelect = row.querySelector('.ai-parse-result-field-select');
+                        
+                        // 添加所有字段作为选项
+                        fields.forEach(field => {
+                            const option1 = document.createElement('option');
+                            option1.value = field.field_name;
+                            option1.textContent = `${field.field_name} (${field.field_type})`;
+                            if (tableConfig.ai_parse.base_field && tableConfig.ai_parse.base_field.includes(field.field_name)) {
+                                option1.selected = true;
+                            }
+                            aiParseBaseFieldSelect.appendChild(option1);
+                            
+                            const option2 = document.createElement('option');
+                            option2.value = field.field_name;
+                            option2.textContent = `${field.field_name} (${field.field_type})`;
+                            if (field.field_name === tableConfig.ai_parse.result_field) {
+                                option2.selected = true;
+                            }
+                            aiParseResultFieldSelect.appendChild(option2);
                         });
                     }
                 } catch (error) {
@@ -558,11 +654,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const taskDueFieldSelect = row.querySelector('.task-due-field-select');
         const taskAssigneeFieldSelect = row.querySelector('.task-assignee-field-select');
         
+        // 获取AI解析配置的字段选择下拉框
+        const aiParseBaseFieldSelect = row.querySelector('.ai-parse-base-field-select');
+        const aiParseResultFieldSelect = row.querySelector('.ai-parse-result-field-select');
+        
         writeFieldsList.innerHTML = '';
         checkFieldsList.innerHTML = '';
         
         // 清空并重新填充任务字段选择下拉框
-        [taskSummaryFieldSelect, taskDueFieldSelect, taskAssigneeFieldSelect].forEach(select => {
+        [taskSummaryFieldSelect, taskDueFieldSelect, taskAssigneeFieldSelect, aiParseBaseFieldSelect, aiParseResultFieldSelect].forEach(select => {
             if (select) {
                 select.innerHTML = '<option value="">请选择字段</option>';
             }
@@ -648,6 +748,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 option.textContent = `${field.field_name} (${field.field_type})`;
                 taskAssigneeFieldSelect.appendChild(option);
             }
+            
+            // 更新AI解析配置的字段选择下拉框
+            if (aiParseBaseFieldSelect) {
+                const option = document.createElement('option');
+                option.value = field.field_name;
+                option.textContent = `${field.field_name} (${field.field_type})`;
+                aiParseBaseFieldSelect.appendChild(option);
+            }
+            
+            if (aiParseResultFieldSelect) {
+                const option = document.createElement('option');
+                option.value = field.field_name;
+                option.textContent = `${field.field_name} (${field.field_type})`;
+                aiParseResultFieldSelect.appendChild(option);
+            }
         });
         
         // 如果当前行有任务配置，设置默认选中
@@ -660,6 +775,21 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         if (rowData.taskAssigneeField) {
             taskAssigneeFieldSelect.value = rowData.taskAssigneeField;
+        }
+        
+        // 如果当前行有AI解析配置，设置默认选中
+        if (rowData.aiParseBaseField) {
+            // 确保值是字符串类型
+            aiParseBaseFieldSelect.value = String(rowData.aiParseBaseField);
+        }
+        if (rowData.aiParseResultField) {
+            aiParseResultFieldSelect.value = rowData.aiParseResultField;
+        }
+        if (rowData.aiParsePrompt) {
+            const aiParsePromptTextarea = row.querySelector('.ai-parse-prompt');
+            if (aiParsePromptTextarea) {
+                aiParsePromptTextarea.value = rowData.aiParsePrompt;
+            }
         }
     }
 
@@ -763,6 +893,32 @@ document.addEventListener('DOMContentLoaded', function() {
                 const taskAssigneeFieldSelect = row.querySelector('.task-assignee-field-select');
                 const taskAssigneeField = taskAssigneeFieldSelect ? taskAssigneeFieldSelect.value : '';
                 
+                // 获取AI解析配置
+                const aiParseCheckbox = row.querySelector('.ai-parse-checkbox');
+                const aiParseEnabled = aiParseCheckbox ? aiParseCheckbox.checked : false;
+                
+                const aiParseBaseFieldSelect = row.querySelector('.ai-parse-base-field-select');
+                const aiParseBaseField = aiParseBaseFieldSelect ? aiParseBaseFieldSelect.value : '';
+                
+                const aiParseResultFieldSelect = row.querySelector('.ai-parse-result-field-select');
+                const aiParseResultField = aiParseResultFieldSelect ? aiParseResultFieldSelect.value : '';
+                
+                const aiParsePromptTextarea = row.querySelector('.ai-parse-prompt');
+                const aiParsePrompt = aiParsePromptTextarea ? aiParsePromptTextarea.value.trim() : '请基于以下内容进行解析和处理：{content}';
+                
+                // 处理base_field为数组类型，与后端结构体保持一致
+                const baseFieldArray = aiParseBaseField ? [aiParseBaseField] : [];
+                
+                const aiParseConfig = aiParseEnabled ? {
+                    enabled: true,
+                    base_field: baseFieldArray,
+                    result_field: aiParseResultField,
+                    prompt: aiParsePrompt
+                } : {
+                    enabled: false,
+                    base_field: []
+                };
+                
                 tables.push({
                     url: url,
                     app_token: appToken,
@@ -773,7 +929,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     create_task: createTask,
                     task_summary_field: taskSummaryField,
                     task_due_field: taskDueField,
-                    task_assignee_field: taskAssigneeField
+                    task_assignee_field: taskAssigneeField,
+                    ai_parse: aiParseConfig
                 });
             }
             
@@ -781,7 +938,12 @@ document.addEventListener('DOMContentLoaded', function() {
             app_id: appId,
             app_secret: appSecret,
             tables: tables,
-            group_chat_id: groupChatId
+            group_chat_id: groupChatId,
+            silicon_flow: {
+                api_key: siliconFlowApiKeyInput.value.trim(),
+                model: siliconFlowModelInput.value,
+                default_prompt: siliconFlowDefaultPromptTextarea.value.trim()
+            }
         };
             
             saveConfigBtn.disabled = true;
@@ -827,36 +989,79 @@ document.addEventListener('DOMContentLoaded', function() {
     // 显示当前配置
     function displayCurrentConfig(config) {
         let tablesHtml = '<div style="margin-top: 10px;">';
-        if (config.tables && config.tables.length > 0) {
-            config.tables.forEach((table, index) => {
-                tablesHtml += `
-                    <div style="margin-bottom: 15px; padding: 10px; background: #f3f4f6; border-radius: 6px;">
-                        <strong>表格 ${index + 1}: ${table.name}</strong><br>
-                        <small>数据表ID: ${table.table_id}</small><br>
-                        <small>待写入字段: ${table.write_fields.map(field => field.field_name).join(', ')}</small><br>
-                        ${table.check_fields.length > 0 ? `<small>检测字段: ${table.check_fields.join(', ')}</small>` : ''}
+    if (config.tables && config.tables.length > 0) {
+        config.tables.forEach((table, index) => {
+            tablesHtml += `
+                <div class="table-config-wrapper" style="margin-bottom: 20px; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden;">
+                    <div class="table-config-header" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: #f9fafb;">
+                        <div style="font-weight: 600;">表格 ${index + 1}: ${table.name || '未命名'}</div>
+                        <div class="toggle-icon" style="font-size: 12px; color: #6b7280;">▼</div>
                     </div>
-                `;
-            });
-        } else {
-            tablesHtml += '<p>未配置表格</p>';
-        }
-        tablesHtml += '</div>';
-        
-        currentConfig.innerHTML = `
-            <div class="config-item">
-                <span class="config-label">应用ID:</span>
-                <span class="config-value">${config.app_id || '未配置'}</span>
-            </div>
-            <div class="config-item">
-                <span class="config-label">配置的表格:</span>
-                <span class="config-value">${tablesHtml}</span>
-            </div>
-            <div class="config-item">
-                <span class="config-label">群聊ID:</span>
-                <span class="config-value">${config.group_chat_id || '未配置'}</span>
-            </div>
-        `;
+                    <div class="table-config-content" style="padding: 15px; background: white; display: none;">
+                        <div style="margin-bottom: 5px;">URL: ${table.url}</div>
+                        <div style="margin-bottom: 5px;">应用Token: ${table.app_token}</div>
+                        <div style="margin-bottom: 5px;">表格ID: ${table.table_id}</div>
+                        <div style="margin-bottom: 5px;">待写入字段: ${table.write_fields.map(field => field.field_name).join(', ')}</div>
+                        <div style="margin-bottom: 5px;">检测字段: ${table.check_fields.join(', ') || '未设置'}</div>
+                        <div style="margin-bottom: 5px;">创建任务: ${table.create_task ? '是' : '否'}</div>
+                        ${table.task_summary_field ? `<div style="margin-bottom: 5px;">任务标题字段: ${table.task_summary_field}</div>` : ''}
+                        ${table.task_due_field ? `<div style="margin-bottom: 5px;">任务截止日期字段: ${table.task_due_field}</div>` : ''}
+                        ${table.task_assignee_field ? `<div style="margin-bottom: 5px;">任务负责人字段: ${table.task_assignee_field}</div>` : ''}
+                        ${table.ai_parse ? `<div style="margin-bottom: 5px;">AI解析: ${table.ai_parse.enabled ? '启用' : '禁用'}</div>` : ''}
+                        ${table.ai_parse && table.ai_parse.enabled ? `<div style="margin-bottom: 5px;">基于字段: ${table.ai_parse.base_field}</div>` : ''}
+                        ${table.ai_parse && table.ai_parse.enabled ? `<div style="margin-bottom: 5px;">结果字段: ${table.ai_parse.result_field}</div>` : ''}
+                        ${table.ai_parse && table.ai_parse.enabled ? `<div style="margin-bottom: 5px;">提示词: ${table.ai_parse.prompt}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        });
+    } else {
+        tablesHtml += '<p>未配置表格</p>';
+    }
+    tablesHtml += '</div>';
+    
+    currentConfig.innerHTML = `
+        <div class="config-item">
+            <span class="config-label">应用ID:</span>
+            <span class="config-value">${config.app_id || '未配置'}</span>
+        </div>
+        <div class="config-item">
+            <span class="config-label">配置的表格:</span>
+            <span class="config-value">${tablesHtml}</span>
+        </div>
+        <div class="config-item">
+            <span class="config-label">群聊ID:</span>
+            <span class="config-value">${config.group_chat_id || '未配置'}</span>
+        </div>
+        <div class="config-item">
+            <span class="config-label">SiliconFlow API Key:</span>
+            <span class="config-value">${config.silicon_flow?.api_key ? '已配置' : '未配置'}</span>
+        </div>
+        <div class="config-item">
+            <span class="config-label">AI模型:</span>
+            <span class="config-value">${config.silicon_flow?.model || '未配置'}</span>
+        </div>
+        <div class="config-item">
+            <span class="config-label">默认提示词:</span>
+            <span class="config-value">${config.silicon_flow?.default_prompt ? '<pre style="max-height: 100px; overflow-y: auto; padding: 5px; background: #f9fafb; border-radius: 4px;">' + (config.silicon_flow.default_prompt || '').replace(/\n/g, '<br>') + '</pre>' : '未配置'}</span>
+        </div>
+    `;
+    
+    // 添加表格配置的展开/收缩功能
+    document.querySelectorAll('.table-config-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const content = header.nextElementSibling;
+            const icon = header.querySelector('.toggle-icon');
+            
+            if (content.style.display === 'none' || content.style.display === '') {
+                content.style.display = 'block';
+                icon.textContent = '▲';
+            } else {
+                content.style.display = 'none';
+                icon.textContent = '▼';
+            }
+        });
+    });
     }
 
     // 加载已保存的配置
@@ -873,6 +1078,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 appIdInput.value = config.app_id || '';
                 appSecretInput.value = config.app_secret || '';
                 groupChatIdInput.value = config.group_chat_id || '';
+                
+                // 加载AI解析配置
+                siliconFlowApiKeyInput.value = config.silicon_flow?.api_key || '';
+                siliconFlowModelInput.value = config.silicon_flow?.model || 'Qwen/Qwen2.5-7B-Instruct';
+                siliconFlowDefaultPromptTextarea.value = config.silicon_flow?.default_prompt || '请解析以下内容，提取关键信息并整理成结构化格式：\n\n{content}';
                 
                 currentConfigData = config;
                 
@@ -907,6 +1117,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     appSecretInput.value = config.app_secret || '';
                     groupChatIdInput.value = config.group_chat_id || '';
                     
+                    // 从本地存储加载AI解析配置
+                    siliconFlowApiKeyInput.value = config.silicon_flow?.api_key || '';
+                    siliconFlowModelInput.value = config.silicon_flow?.model || 'Qwen/Qwen2.5-7B-Instruct';
+                    siliconFlowDefaultPromptTextarea.value = config.silicon_flow?.default_prompt || '请解析以下内容，提取关键信息并整理成结构化格式：\n\n{content}';
+                    
                     currentConfigData = config;
                     
                     displayCurrentConfig(config);
@@ -919,16 +1134,16 @@ document.addEventListener('DOMContentLoaded', function() {
                             // 清空现有表格行
                             tableUrlsContainer.innerHTML = '';
                             // 添加所有已配置的表格
-                            config.tables.forEach(table => {
-                                addTableUrlRow(table);
+                            config.tables.forEach(async table => {
+                                await addTableUrlRow(table);
                             });
                         } else {
-                            addTableUrlRow();
+                            await addTableUrlRow();
                         }
                     }
                 } else {
                     // 如果本地存储也没有配置，添加一个空行
-                    addTableUrlRow();
+                    await addTableUrlRow();
                 }
             }
         } catch (error) {

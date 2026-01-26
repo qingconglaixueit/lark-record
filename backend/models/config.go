@@ -7,12 +7,28 @@ type WriteField struct {
 	UiType    string `json:"ui_type"`    // 字段UI类型
 }
 
+// SiliconFlowConfig SiliconFlow API配置
+type SiliconFlowConfig struct {
+	ApiKey        string `json:"api_key"`        // API密钥
+	Model         string `json:"model"`          // 使用的模型
+	DefaultPrompt string `json:"default_prompt"` // 默认提示词
+}
+
+// AIParseConfig AI解析配置
+type AIParseConfig struct {
+	Enabled     bool     `json:"enabled"`      // 是否启用AI解析
+	BaseField   []string `json:"base_field"`   // 基于的字段
+	ResultField string   `json:"result_field"` // 结果字段
+	Prompt      string   `json:"prompt"`       // 提示词
+}
+
 // Config 飞书配置
 type Config struct {
-	AppID       string        `json:"app_id"`
-	AppSecret   string        `json:"app_secret"`
-	Tables      []TableConfig `json:"tables"`        // 多个表格配置
-	GroupChatID string        `json:"group_chat_id"` // 消息发送群ID
+	AppID       string            `json:"app_id"`
+	AppSecret   string            `json:"app_secret"`
+	Tables      []TableConfig     `json:"tables"`        // 多个表格配置
+	GroupChatID string            `json:"group_chat_id"` // 消息发送群ID
+	SiliconFlow SiliconFlowConfig `json:"silicon_flow"`  // SiliconFlow API配置
 
 	// 向后兼容旧版本配置
 	TableID     string       `json:"table_id,omitempty"`
@@ -22,16 +38,17 @@ type Config struct {
 
 // TableConfig 单个表格的配置
 type TableConfig struct {
-	URL               string       `json:"url"`                 // 飞书多维表格URL
-	AppToken          string       `json:"app_token"`           // 从URL解析的app_token
-	TableID           string       `json:"table_id"`            // 数据表ID
-	Name              string       `json:"name"`                // 表格名称
-	WriteFields       []WriteField `json:"write_fields"`        // 待写入的字段
-	CheckFields       []string     `json:"check_fields"`        // 需要检测是否有值的字段
-	CreateTask        bool         `json:"create_task"`         // 是否创建任务
-	TaskSummaryField  string       `json:"task_summary_field"`  // 任务标题字段
-	TaskDueField      string       `json:"task_due_field"`      // 任务截止日期字段
-	TaskAssigneeField string       `json:"task_assignee_field"` // 任务负责人字段
+	URL               string        `json:"url"`                 // 飞书多维表格URL
+	AppToken          string        `json:"app_token"`           // 从URL解析的app_token
+	TableID           string        `json:"table_id"`            // 数据表ID
+	Name              string        `json:"name"`                // 表格名称
+	WriteFields       []WriteField  `json:"write_fields"`        // 待写入的字段
+	CheckFields       []string      `json:"check_fields"`        // 需要检测是否有值的字段
+	CreateTask        bool          `json:"create_task"`         // 是否创建任务
+	TaskSummaryField  string        `json:"task_summary_field"`  // 任务标题字段
+	TaskDueField      string        `json:"task_due_field"`      // 任务截止日期字段
+	TaskAssigneeField string        `json:"task_assignee_field"` // 任务负责人字段
+	AIParse           AIParseConfig `json:"ai_parse"`            // AI解析配置
 }
 
 // Bitable 飞书多维表格
