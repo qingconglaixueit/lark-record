@@ -15,6 +15,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// min 辅助函数，返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // 存储配置信息的缓存
 var configCache models.Config
 var cacheMutex sync.RWMutex
@@ -86,6 +94,25 @@ func saveConfigToFile() {
 	}
 
 	fmt.Println("配置已保存到文件")
+}
+
+// TestConfig 测试配置是否有效（不保存配置）
+func TestConfig(c *gin.Context) {
+	var testConfig models.Config
+	if err := c.ShouldBindJSON(&testConfig); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 测试配置是否有效 - 验证凭证
+	larkService := services.NewLarkService(testConfig.AppID, testConfig.AppSecret)
+	err := larkService.ValidateCredentials()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "飞书配置无效: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "配置有效！"})
 }
 
 // SaveConfig 保存配置（增量更新）
@@ -335,13 +362,34 @@ func AddRecord(c *gin.Context) {
 			// 等待10秒后开始检测，避免立即检测可能出现的数据同步延迟
 			time.Sleep(10 * time.Second)
 
-			// 持续检测，直到所有指定字段都有数据
-			for {
+			// 设置最大检测次数和基础间隔
+			maxChecks := 20
+			baseInterval := 10 * time.Second
+			maxInterval := 5 * time.Minute
+			checkCount := 0
+
+			// 持续检测，直到所有指定字段都有数据或达到最大检测次数
+			for checkCount < maxChecks {
 				completed, fieldValues, err := larkService.CheckFieldsCompleted(req.AppToken, req.TableID, recordID, checkFields)
 				if err != nil {
 					fmt.Printf("❌ 检查字段状态失败: %v\n", err)
+					
+					// 检查是否是网络错误或飞书API错误，决定是否重试
+					retry := strings.Contains(err.Error(), "network") || strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "API")
+					if !retry {
+						fmt.Printf("❌ 检查字段状态失败，错误不可重试，停止检测\n")
+						break
+					}
+					
 					// 等待一段时间后重试
-					time.Sleep(5 * time.Second)
+					// 计算智能轮询间隔：基础间隔 * (2^min(checkCount, 6))，最大不超过maxInterval
+					exponentialFactor := 1 << uint(min(checkCount, 6)) // 2的幂，最多64倍
+					checkInterval := baseInterval * time.Duration(exponentialFactor)
+					if checkInterval > maxInterval {
+						checkInterval = maxInterval
+					}
+					time.Sleep(checkInterval)
+					checkCount++
 					continue
 				}
 
@@ -603,8 +651,20 @@ func AddRecord(c *gin.Context) {
 					// 还有字段没有数据，继续检测
 					fmt.Printf("⏳ 记录ID %s 的指定字段尚未全部有数据，继续检测...\n", recordID)
 					// 等待一段时间后重试
-					time.Sleep(5 * time.Second)
+					// 计算智能轮询间隔：基础间隔 * (2^min(checkCount, 6))，最大不超过maxInterval
+					exponentialFactor := 1 << uint(min(checkCount, 6)) // 2的幂，最多64倍
+					checkInterval := baseInterval * time.Duration(exponentialFactor)
+					if checkInterval > maxInterval {
+						checkInterval = maxInterval
+					}
+					time.Sleep(checkInterval)
+					checkCount++
 				}
+			}
+
+			// 如果达到最大检测次数仍未完成，记录日志
+			if checkCount >= maxChecks {
+				fmt.Printf("⏰ 记录ID %s 的字段检测已达到最大次数(%d次)，自动停止检测\n", recordID, maxChecks)
 			}
 		}()
 	}

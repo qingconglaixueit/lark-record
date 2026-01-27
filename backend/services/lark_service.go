@@ -18,6 +18,52 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
+// 常量定义
+const (
+	// 缓存有效期
+	TenantAccessTokenExpireTime = 1 * time.Hour  // 租户访问令牌有效期
+	WikiTokenCacheExpireTime    = 1 * time.Hour  // Wiki Token缓存有效期
+	FieldsCacheExpireTime       = 10 * time.Minute // 字段缓存有效期
+	
+	// 重试配置
+	MaxRetries     = 3              // 最大重试次数
+	InitialRetryDelay = 1 * time.Second // 初始重试间隔
+)
+
+// 定期清理过期缓存的函数
+func (s *LarkService) cleanExpiredCache() {
+	for {
+		// 每10分钟清理一次缓存
+		time.Sleep(10 * time.Minute)
+		
+		now := time.Now()
+		
+		// 清理wikiTokenCache
+		s.wikiTokenCache.Range(func(key, value interface{}) bool {
+			// 在原始代码中wikiTokenCache只存储bool值，需要先修改为存储结构体
+			// 这里我们需要先检查是否已经是结构体类型
+			if cacheItem, ok := value.(struct {
+				isWiki  bool
+				expires time.Time
+			}); ok {
+				if now.After(cacheItem.expires) {
+					s.wikiTokenCache.Delete(key)
+				}
+			}
+			return true
+		})
+		
+		// 清理fieldsCache
+		s.fieldsCacheTime.Range(func(key, value interface{}) bool {
+			if now.After(value.(time.Time)) {
+				s.fieldsCache.Delete(key)
+				s.fieldsCacheTime.Delete(key)
+			}
+			return true
+		})
+	}
+}
+
 // WikiNodeResponse 知识库节点响应
 type WikiNodeResponse struct {
 	Code int    `json:"code"`
@@ -53,20 +99,34 @@ type WikiNodesResponse struct {
 }
 
 type LarkService struct {
-	appID      string
-	appSecret  string
-	client     *lark.Client
-	httpClient *http.Client
+	appID            string
+	appSecret        string
+	client           *lark.Client
+	httpClient       *http.Client
 	// Wiki转换结果缓存
 	wikiConvertCache sync.Map
+	// 访问令牌缓存
+	tenantAccessToken string
+	tokenExpireTime   time.Time
+	tokenMutex        sync.RWMutex
+	// 字段缓存
+	fieldsCache     sync.Map
+	fieldsCacheTime sync.Map
+	// Wiki Token缓存
+	wikiTokenCache  sync.Map
 }
 
 func NewLarkService(appID, appSecret string) *LarkService {
-	return &LarkService{
+	larkService := &LarkService{
 		appID:      appID,
 		appSecret:  appSecret,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
+	
+	// 启动定期清理缓存的goroutine
+	go larkService.cleanExpiredCache()
+	
+	return larkService
 }
 
 // ValidateCredentials 验证飞书应用凭证是否有效
@@ -188,9 +248,11 @@ func (s *LarkService) GetBitables() ([]models.Bitable, error) {
 func (s *LarkService) GetBitableTables(appToken string, isWiki bool) ([]models.TableInfo, error) {
 	s.initClient()
 
-	// 如果前端明确指出是wiki类型，直接处理
-	if isWiki {
-		fmt.Println("🔍 前端标识为Wiki Token，直接处理...")
+	// 如果URL中包含"wiki"字符串，直接处理为Wiki表格
+	isWikiToken := isWiki || strings.Contains(appToken, "wiki") || strings.Contains(appToken, "Wiki")
+	
+	if isWikiToken {
+		fmt.Println("🔍 检测到Wiki链接，直接处理...")
 		// 尝试通过HTTP API直接获取数据表
 		tables, err := s.fetchWikiTablesDirectly(appToken)
 		if err != nil {
@@ -216,26 +278,8 @@ func (s *LarkService) GetBitableTables(appToken string, isWiki bool) ([]models.T
 		return nil, fmt.Errorf("获取数据表列表失败: %v", err)
 	}
 
-	// 如果返回91402、99991663或1254003错误，可能是wiki token，尝试处理
 	if !resp.Success() {
-		if resp.Code == 91402 || resp.Code == 99991663 || resp.Code == 1254003 {
-			fmt.Println("🔍 API调用失败，检测到可能是Wiki Token，尝试处理...")
-
-			// 尝试通过HTTP API直接获取数据表
-			tables, err := s.fetchWikiTablesDirectly(appToken)
-			if err != nil {
-				return []models.TableInfo{}, fmt.Errorf("Wiki链接处理失败: %v", err)
-			}
-
-			if len(tables) > 0 {
-				fmt.Printf("✅ 成功获取到Wiki中的数据表: %d 个\n", len(tables))
-				return tables, nil
-			}
-
-			return []models.TableInfo{}, nil
-		} else {
-			return nil, fmt.Errorf("获取数据表列表失败: %s (Code: %d)", resp.Msg, resp.Code)
-		}
+		return nil, fmt.Errorf("获取数据表列表失败: %s (Code: %d)", resp.Msg, resp.Code)
 	}
 
 	var tables []models.TableInfo
@@ -645,8 +689,47 @@ func (s *LarkService) fetchBitableTables(bitableToken, bitableName, accessToken 
 	return []models.TableInfo{}, nil
 }
 
-// GetTableFields 获取数据表的所有字段
+// IsWikiToken 判断是否为Wiki Token
+func (s *LarkService) IsWikiToken(appToken string) bool {
+	// 先检查缓存
+	if cached, ok := s.wikiTokenCache.Load(appToken); ok {
+		// 检查是否是新的结构体缓存格式
+		if cacheItem, ok := cached.(struct {
+			isWiki  bool
+			expires time.Time
+		}); ok {
+			return cacheItem.isWiki
+		}
+		// 兼容旧的bool缓存格式
+		return cached.(bool)
+	}
+
+	// 通过URL是否包含"wiki"字符串来判断
+	isWiki := strings.Contains(strings.ToLower(appToken), "wiki")
+	
+	// 缓存结果，有效期1小时
+	s.wikiTokenCache.Store(appToken, struct {
+		isWiki  bool
+		expires time.Time
+	}{isWiki, time.Now().Add(WikiTokenCacheExpireTime)})
+	return isWiki
+}
+
+// GetTableFields 获取数据表的所有字段（带缓存）
 func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, error) {
+	// 缓存键
+	cacheKey := fmt.Sprintf("%s:%s", appToken, tableID)
+	
+	// 检查缓存
+	if cachedFields, ok := s.fieldsCache.Load(cacheKey); ok {
+		if cachedTime, ok := s.fieldsCacheTime.Load(cacheKey); ok {
+			// 缓存有效期
+			if time.Since(cachedTime.(time.Time)) < FieldsCacheExpireTime {
+				return cachedFields.([]models.Field), nil
+			}
+		}
+	}
+	
 	s.initClient()
 
 	ctx := context.Background()
@@ -815,6 +898,10 @@ func (s *LarkService) GetTableFields(appToken, tableID string) ([]models.Field, 
 		}
 	}
 
+	// 缓存字段结果
+	s.fieldsCache.Store(cacheKey, fields)
+	s.fieldsCacheTime.Store(cacheKey, time.Now())
+	
 	return fields, nil
 }
 
@@ -828,30 +915,32 @@ func (s *LarkService) getTableFieldsViaHTTP(appToken, tableID string) ([]models.
 
 	// 检查是否为 wiki token
 	realAppToken := appToken
-	getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
-	nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
-	if err == nil {
-		nodeReq.Header.Set("Authorization", "Bearer "+token)
-		nodeResp, nodeErr := s.httpClient.Do(nodeReq)
-		if nodeErr == nil {
-			defer nodeResp.Body.Close()
-			nodeBody, _ := io.ReadAll(nodeResp.Body)
+	if s.IsWikiToken(appToken) {
+		getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
+		nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
+		if err == nil {
+			nodeReq.Header.Set("Authorization", "Bearer "+token)
+			nodeResp, nodeErr := s.httpClient.Do(nodeReq)
+			if nodeErr == nil {
+				defer nodeResp.Body.Close()
+				nodeBody, _ := io.ReadAll(nodeResp.Body)
 
-			type GetNodeResponse struct {
-				Code int `json:"code"`
-				Data struct {
-					Node struct {
-						ObjToken string `json:"obj_token"`
-						ObjType  string `json:"obj_type"`
-						Title    string `json:"title"`
-					} `json:"node"`
-				} `json:"data"`
-			}
-			var nodeResult GetNodeResponse
-			if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
-				if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
-					fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
-					realAppToken = nodeResult.Data.Node.ObjToken
+				type GetNodeResponse struct {
+					Code int `json:"code"`
+					Data struct {
+						Node struct {
+							ObjToken string `json:"obj_token"`
+							ObjType  string `json:"obj_type"`
+							Title    string `json:"title"`
+						} `json:"node"`
+					} `json:"data"`
+				}
+				var nodeResult GetNodeResponse
+				if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
+					if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
+						fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
+						realAppToken = nodeResult.Data.Node.ObjToken
+					}
 				}
 			}
 		}
@@ -955,32 +1044,34 @@ func (s *LarkService) AddRecord(appToken, tableID string, fields map[string]inte
 		return "", fmt.Errorf("获取访问令牌失败: %w", err)
 	}
 
-	// 尝试判断是否为 wiki token：如果以 "BEsNwa" 等开头，很可能是 wiki token
-	// 或者尝试调用 wiki API 检查
-	getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
-	nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
-	if err == nil {
-		nodeReq.Header.Set("Authorization", "Bearer "+token)
-		nodeResp, nodeErr := s.httpClient.Do(nodeReq)
-		if nodeErr == nil {
-			defer nodeResp.Body.Close()
-			nodeBody, _ := io.ReadAll(nodeResp.Body)
+	// 检查是否为 Wiki Token
+	if s.IsWikiToken(appToken) {
+		// 调用飞书Wiki API获取obj_token
+		getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
+		nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
+		if err == nil {
+			nodeReq.Header.Set("Authorization", "Bearer "+token)
+			nodeResp, nodeErr := s.httpClient.Do(nodeReq)
+			if nodeErr == nil {
+				defer nodeResp.Body.Close()
+				nodeBody, _ := io.ReadAll(nodeResp.Body)
 
-			type GetNodeResponse struct {
-				Code int `json:"code"`
-				Data struct {
-					Node struct {
-						ObjToken string `json:"obj_token"`
-						ObjType  string `json:"obj_type"`
-						Title    string `json:"title"`
-					} `json:"node"`
-				} `json:"data"`
-			}
-			var nodeResult GetNodeResponse
-			if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
-				if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
-					fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
-					realAppToken = nodeResult.Data.Node.ObjToken
+				type GetNodeResponse struct {
+					Code int `json:"code"`
+					Data struct {
+						Node struct {
+							ObjToken string `json:"obj_token"`
+							ObjType  string `json:"obj_type"`
+							Title    string `json:"title"`
+						} `json:"node"`
+					} `json:"data"`
+				}
+				var nodeResult GetNodeResponse
+				if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
+					if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
+						fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
+						realAppToken = nodeResult.Data.Node.ObjToken
+					}
 				}
 			}
 		}
@@ -1206,32 +1297,33 @@ func (s *LarkService) CheckFieldsCompleted(appToken, tableID, recordID string, c
 		return false, nil, fmt.Errorf("获取访问令牌失败: %w", err)
 	}
 
-	// 尝试判断是否为 wiki token：如果以 "BEsNwa" 等开头，很可能是 wiki token
-	// 或者尝试调用 wiki API 检查
-	getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
-	nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
-	if err == nil {
-		nodeReq.Header.Set("Authorization", "Bearer "+token)
-		nodeResp, nodeErr := s.httpClient.Do(nodeReq)
-		if nodeErr == nil {
-			defer nodeResp.Body.Close()
-			nodeBody, _ := io.ReadAll(nodeResp.Body)
+	// 检查是否为 Wiki Token
+	if s.IsWikiToken(appToken) {
+		getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
+		nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
+		if err == nil {
+			nodeReq.Header.Set("Authorization", "Bearer "+token)
+			nodeResp, nodeErr := s.httpClient.Do(nodeReq)
+			if nodeErr == nil {
+				defer nodeResp.Body.Close()
+				nodeBody, _ := io.ReadAll(nodeResp.Body)
 
-			type GetNodeResponse struct {
-				Code int `json:"code"`
-				Data struct {
-					Node struct {
-						ObjToken string `json:"obj_token"`
-						ObjType  string `json:"obj_type"`
-						Title    string `json:"title"`
-					} `json:"node"`
-				} `json:"data"`
-			}
-			var nodeResult GetNodeResponse
-			if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
-				if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
-					fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
-					realAppToken = nodeResult.Data.Node.ObjToken
+				type GetNodeResponse struct {
+					Code int `json:"code"`
+					Data struct {
+						Node struct {
+							ObjToken string `json:"obj_token"`
+							ObjType  string `json:"obj_type"`
+							Title    string `json:"title"`
+						} `json:"node"`
+					} `json:"data"`
+				}
+				var nodeResult GetNodeResponse
+				if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
+					if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
+						fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
+						realAppToken = nodeResult.Data.Node.ObjToken
+					}
 				}
 			}
 		}
@@ -1304,32 +1396,33 @@ func (s *LarkService) GetRecord(appToken, tableID, recordID string) (map[string]
 		return nil, fmt.Errorf("获取访问令牌失败: %w", err)
 	}
 
-	// 尝试判断是否为 wiki token：如果以 "BEsNwa" 等开头，很可能是 wiki token
-	// 或者尝试调用 wiki API 检查
-	getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
-	nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
-	if err == nil {
-		nodeReq.Header.Set("Authorization", "Bearer "+token)
-		nodeResp, nodeErr := s.httpClient.Do(nodeReq)
-		if nodeErr == nil {
-			defer nodeResp.Body.Close()
-			nodeBody, _ := io.ReadAll(nodeResp.Body)
+	// 检查是否为 Wiki Token
+	if s.IsWikiToken(appToken) {
+		getNodeURL := fmt.Sprintf("https://open.feishu.cn/open-apis/wiki/v2/spaces/get_node?user_id_type=user_id&token=%s", appToken)
+		nodeReq, err := http.NewRequest("GET", getNodeURL, nil)
+		if err == nil {
+			nodeReq.Header.Set("Authorization", "Bearer "+token)
+			nodeResp, nodeErr := s.httpClient.Do(nodeReq)
+			if nodeErr == nil {
+				defer nodeResp.Body.Close()
+				nodeBody, _ := io.ReadAll(nodeResp.Body)
 
-			type GetNodeResponse struct {
-				Code int `json:"code"`
-				Data struct {
-					Node struct {
-						ObjToken string `json:"obj_token"`
-						ObjType  string `json:"obj_type"`
-						Title    string `json:"title"`
-					} `json:"node"`
-				} `json:"data"`
-			}
-			var nodeResult GetNodeResponse
-			if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
-				if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
-					fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
-					realAppToken = nodeResult.Data.Node.ObjToken
+				type GetNodeResponse struct {
+					Code int `json:"code"`
+					Data struct {
+						Node struct {
+							ObjToken string `json:"obj_token"`
+							ObjType  string `json:"obj_type"`
+							Title    string `json:"title"`
+						} `json:"node"`
+					} `json:"data"`
+				}
+				var nodeResult GetNodeResponse
+				if json.Unmarshal(nodeBody, &nodeResult) == nil && nodeResult.Code == 0 {
+					if nodeResult.Data.Node.ObjType == "bitable" && nodeResult.Data.Node.ObjToken != "" {
+						fmt.Printf("✅ 检测到 Wiki Token，获取到 ObjToken: %s\n", nodeResult.Data.Node.ObjToken)
+						realAppToken = nodeResult.Data.Node.ObjToken
+					}
 				}
 			}
 		}
@@ -1526,8 +1619,26 @@ func (s *LarkService) CreateTask(title string, dueTimestamp int64, isAllDay bool
 	return nil
 }
 
-// getTenantAccessToken 获取租户访问令牌
+// getTenantAccessToken 获取租户访问令牌（带缓存）
 func (s *LarkService) getTenantAccessToken() (string, error) {
+	// 检查缓存
+	s.tokenMutex.RLock()
+	if s.tenantAccessToken != "" && time.Now().Before(s.tokenExpireTime) {
+		token := s.tenantAccessToken
+		s.tokenMutex.RUnlock()
+		return token, nil
+	}
+	s.tokenMutex.RUnlock()
+
+	// 获取新令牌
+	s.tokenMutex.Lock()
+	defer s.tokenMutex.Unlock()
+
+	// 双重检查
+	if s.tenantAccessToken != "" && time.Now().Before(s.tokenExpireTime) {
+		return s.tenantAccessToken, nil
+	}
+
 	reqBody := map[string]string{
 		"app_id":     s.appID,
 		"app_secret": s.appSecret,
@@ -1576,5 +1687,14 @@ func (s *LarkService) getTenantAccessToken() (string, error) {
 		return "", fmt.Errorf("获取令牌失败: %s (code: %d)", result.Msg, result.Code)
 	}
 
-	return result.TenantAccessToken, nil
+	// 缓存令牌，提前10分钟过期
+	s.tenantAccessToken = result.TenantAccessToken
+	// 使用常量定义的有效期
+	tokenExpire := time.Duration(result.Expire) * time.Second
+	if tokenExpire > TenantAccessTokenExpireTime {
+		tokenExpire = TenantAccessTokenExpireTime
+	}
+	s.tokenExpireTime = time.Now().Add(tokenExpire - 10*time.Minute)
+
+	return s.tenantAccessToken, nil
 }

@@ -14,6 +14,9 @@ backend/lark-record.exe
 # Go依赖
 backend/vendor/
 
+# 配置文件
+backend/config.json
+
 # Go workspace文件
 backend/go.work
 backend/go.work.sum

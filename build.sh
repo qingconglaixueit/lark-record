@@ -85,7 +85,15 @@ cp backend/config.json dist/chrome-extension/ 2>/dev/null || true
 
 # 打包成zip文件
 cd dist
-zip -r lark-record-chrome-extension.zip chrome-extension/
+
+# 检查系统类型，使用不同的打包命令
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
+    # Windows系统，使用PowerShell的Compress-Archive命令
+    powershell -Command "Compress-Archive -Path chrome-extension -DestinationPath lark-record-chrome-extension.zip -Force"
+else
+    # Linux/macOS系统，使用zip命令
+    zip -r lark-record-chrome-extension.zip chrome-extension/
+fi
 
 # 清理临时目录
 rm -rf chrome-extension

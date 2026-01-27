@@ -180,6 +180,7 @@ func main() {
 		// 配置相关
 		api.POST("/config", handlers.SaveConfig)
 		api.GET("/config", handlers.GetConfig)
+		api.POST("/config/test", handlers.TestConfig)
 
 		// 多维表格相关
 		api.GET("/bitables", handlers.GetBitables)
