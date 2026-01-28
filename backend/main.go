@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"lark-record/handlers"
+	"lark-record/services"
 	"log"
 	"os"
 	"strings"
@@ -60,7 +61,8 @@ func (l *Logger) rotate() {
 	}
 
 	// 创建日志目录
-	if err := os.MkdirAll(".", 0755); err != nil {
+	logDir := "./logs"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
 		log.Printf("创建日志目录失败: %v", err)
 		return
 	}
@@ -68,7 +70,8 @@ func (l *Logger) rotate() {
 	// 创建新的日志文件
 	now := time.Now()
 	filename := fmt.Sprintf("%s-%s.log", l.prefix, now.Format("2006-01-02"))
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	filePath := fmt.Sprintf("%s/%s", logDir, filename)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		log.Printf("创建日志文件失败: %v", err)
 		return
@@ -89,8 +92,9 @@ func (l *Logger) cleanOldLogs() {
 	// 计算半个月前的时间
 	cutoff := now.AddDate(0, 0, -15)
 
-	// 遍历当前目录
-	entries, err := os.ReadDir(".")
+	// 遍历日志目录
+	logDir := "./logs"
+	entries, err := os.ReadDir(logDir)
 	if err != nil {
 		log.Printf("读取目录失败: %v", err)
 		return
@@ -121,10 +125,11 @@ func (l *Logger) cleanOldLogs() {
 
 		// 如果日志文件日期早于截止日期，删除
 		if logDate.Before(cutoff) {
-			if err := os.Remove(filename); err != nil {
+			filePath := fmt.Sprintf("%s/%s", logDir, filename)
+			if err := os.Remove(filePath); err != nil {
 				log.Printf("删除旧日志失败: %v", err)
 			} else {
-				log.Printf("删除旧日志: %s", filename)
+				log.Printf("删除旧日志: %s", filePath)
 			}
 		}
 	}
@@ -159,10 +164,24 @@ func (l *Logger) Fatalf(format string, v ...interface{}) {
 }
 
 var logger *Logger
+var serviceManager *services.ServiceManager
+var configService *services.ConfigService
 
 func main() {
 	// 初始化日志管理器
 	logger = NewLogger("server")
+	// 将日志实例设置到services包
+	services.SetLogger(logger)
+	// 初始化配置服务
+	configService = services.NewConfigService("./config.json")
+	// 将配置服务设置到handlers
+	handlers.SetConfigService(configService)
+	// 将日志实例设置到handlers
+	handlers.SetLogger(logger)
+	// 初始化服务管理器
+	serviceManager = services.NewServiceManager()
+	// 将服务管理器设置到handlers
+	handlers.SetServiceManager(serviceManager)
 
 	// 创建Gin路由
 	r := gin.Default()

@@ -1,19 +1,31 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"lark-record/models"
 	"lark-record/services"
 	"net/http"
-	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+// serviceManager 全局服务管理器
+var serviceManager *services.ServiceManager
+
+// SetServiceManager 设置服务管理器
+func SetServiceManager(manager *services.ServiceManager) {
+	serviceManager = manager
+}
+
+// configService 全局配置服务
+var configService *services.ConfigService
+
+// SetConfigService 设置配置服务
+func SetConfigService(configSvc *services.ConfigService) {
+	configService = configSvc
+}
 
 // min 辅助函数，返回两个整数中的较小值
 func min(a, b int) int {
@@ -23,12 +35,36 @@ func min(a, b int) int {
 	return b
 }
 
-// 存储配置信息的缓存
-var configCache models.Config
-var cacheMutex sync.RWMutex
+// 定义日志接口类型
+type Logger interface {
+	Printf(format string, v ...interface{})
+	Println(v ...interface{})
+}
 
-// 配置文件路径 - 使用相对路径
-const configFilePath = "./config.json"
+// logger 全局日志实例
+var logger Logger
+
+// SetLogger 设置日志实例
+func SetLogger(log Logger) {
+	logger = log
+}
+
+// 日志输出函数
+func logInfo(format string, v ...interface{}) {
+	if logger != nil {
+		logger.Printf("[INFO] "+format, v...)
+	} else {
+		fmt.Printf("[INFO] "+format+"\n", v...)
+	}
+}
+
+func logError(format string, v ...interface{}) {
+	if logger != nil {
+		logger.Printf("[ERROR] "+format, v...)
+	} else {
+		fmt.Printf("[ERROR] "+format+"\n", v...)
+	}
+}
 
 // AIParseRequest AI解析请求
 type AIParseRequest struct {
@@ -42,59 +78,7 @@ type AIParseResponse struct {
 	Result string `json:"result"`
 }
 
-// 初始化配置 - 从文件加载
-func init() {
-	loadConfigFromFile()
-}
 
-// loadConfigFromFile 从文件加载配置
-func loadConfigFromFile() {
-	cacheMutex.Lock()
-	defer cacheMutex.Unlock()
-
-	// 检查文件是否存在
-	if _, err := os.Stat(configFilePath); os.IsNotExist(err) {
-		fmt.Println("配置文件不存在，将使用默认配置")
-		return
-	}
-
-	// 读取文件内容
-	data, err := ioutil.ReadFile(configFilePath)
-	if err != nil {
-		fmt.Printf("读取配置文件失败: %v\n", err)
-		return
-	}
-
-	// 解析JSON
-	if err := json.Unmarshal(data, &configCache); err != nil {
-		fmt.Printf("解析配置文件失败: %v\n", err)
-		return
-	}
-
-	fmt.Println("配置文件加载成功")
-}
-
-// saveConfigToFile 保存配置到文件
-func saveConfigToFile() {
-	cacheMutex.RLock()
-	config := configCache
-	cacheMutex.RUnlock()
-
-	// 转换为JSON
-	data, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		fmt.Printf("转换配置为JSON失败: %v\n", err)
-		return
-	}
-
-	// 写入文件
-	if err := ioutil.WriteFile(configFilePath, data, 0644); err != nil {
-		fmt.Printf("写入配置文件失败: %v\n", err)
-		return
-	}
-
-	fmt.Println("配置已保存到文件")
-}
 
 // TestConfig 测试配置是否有效（不保存配置）
 func TestConfig(c *gin.Context) {
@@ -115,7 +99,7 @@ func TestConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "配置有效！"})
 }
 
-// SaveConfig 保存配置（增量更新）
+// SaveConfig 保存配置
 func SaveConfig(c *gin.Context) {
 	var newConfig models.Config
 	if err := c.ShouldBindJSON(&newConfig); err != nil {
@@ -131,77 +115,50 @@ func SaveConfig(c *gin.Context) {
 		return
 	}
 
-	cacheMutex.Lock()
-	defer cacheMutex.Unlock()
-
-	// 增量更新配置
-	// 1. 更新基础配置（AppID, AppSecret等）
-	configCache.AppID = newConfig.AppID
-	configCache.AppSecret = newConfig.AppSecret
-	configCache.GroupChatID = newConfig.GroupChatID
-	// 更新SiliconFlow配置
-	configCache.SiliconFlow = newConfig.SiliconFlow
-
-	// 2. 增量更新表格配置
-	if newConfig.Tables != nil && len(newConfig.Tables) > 0 {
-		// 创建一个map用于快速查找现有表格
-		existingTables := make(map[string]bool)
-		for _, table := range configCache.Tables {
-			key := table.AppToken + "_" + table.TableID
-			existingTables[key] = true
-		}
-
-		// 添加新表格
-		for _, newTable := range newConfig.Tables {
-			key := newTable.AppToken + "_" + newTable.TableID
-			if !existingTables[key] {
-				// 这是一个新表格，添加到配置中
-				configCache.Tables = append(configCache.Tables, newTable)
-				fmt.Printf("添加新表格配置: %s\n", newTable.Name)
-			} else {
-				// 这是一个现有表格，更新配置
-				for i, existingTable := range configCache.Tables {
-					if existingTable.AppToken == newTable.AppToken && existingTable.TableID == newTable.TableID {
-						configCache.Tables[i] = newTable
-						fmt.Printf("更新表格配置: %s\n", newTable.Name)
-						break
-					}
-				}
-			}
-		}
+	// 使用配置服务更新配置
+	if err := configService.SetConfig(&newConfig); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存配置失败: " + err.Error()})
+		return
 	}
 
-	// 保存配置到文件
-	go saveConfigToFile()
+	// 获取更新后的配置
+	config := configService.GetConfig()
 
-	c.JSON(http.StatusOK, gin.H{"message": "配置保存成功", "config": configCache})
+	c.JSON(http.StatusOK, gin.H{"message": "配置保存成功", "config": config})
 }
 
 // GetConfig 获取配置
 func GetConfig(c *gin.Context) {
-	cacheMutex.RLock()
-	defer cacheMutex.RUnlock()
+	if configService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "配置服务未初始化"})
+		return
+	}
 
-	if configCache.AppID == "" {
+	config := configService.GetConfig()
+	if config.AppID == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "未配置"})
 		return
 	}
 
-	c.JSON(http.StatusOK, configCache)
+	c.JSON(http.StatusOK, config)
 }
 
 // GetBitables 获取多维表格列表
 func GetBitables(c *gin.Context) {
-	cacheMutex.RLock()
-	config := configCache
-	cacheMutex.RUnlock()
+	if configService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "配置服务未初始化"})
+		return
+	}
+
+	// 获取配置
+	config := configService.GetConfig()
 
 	if config.AppID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请先配置飞书应用信息"})
 		return
 	}
 
-	larkService := services.NewLarkService(config.AppID, config.AppSecret)
+	larkService := serviceManager.GetLarkService(config.AppID, config.AppSecret)
 	bitables, err := larkService.GetBitables()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -218,9 +175,13 @@ func GetBitables(c *gin.Context) {
 
 // GetBitableTables 获取多维表格中的数据表列表
 func GetBitableTables(c *gin.Context) {
-	cacheMutex.RLock()
-	config := configCache
-	cacheMutex.RUnlock()
+	if configService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "配置服务未初始化"})
+		return
+	}
+
+	// 获取配置
+	config := configService.GetConfig()
 
 	if config.AppID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请先配置飞书应用信息"})
@@ -235,7 +196,7 @@ func GetBitableTables(c *gin.Context) {
 
 	isWiki := c.Query("is_wiki") == "true"
 
-	larkService := services.NewLarkService(config.AppID, config.AppSecret)
+	larkService := serviceManager.GetLarkService(config.AppID, config.AppSecret)
 	tables, err := larkService.GetBitableTables(appToken, isWiki)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -247,9 +208,13 @@ func GetBitableTables(c *gin.Context) {
 
 // GetTableFields 获取数据表的字段列表
 func GetTableFields(c *gin.Context) {
-	cacheMutex.RLock()
-	config := configCache
-	cacheMutex.RUnlock()
+	if configService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "配置服务未初始化"})
+		return
+	}
+
+	// 获取配置
+	config := configService.GetConfig()
 
 	if config.AppID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请先配置飞书应用信息"})
@@ -264,7 +229,7 @@ func GetTableFields(c *gin.Context) {
 		return
 	}
 
-	larkService := services.NewLarkService(config.AppID, config.AppSecret)
+	larkService := serviceManager.GetLarkService(config.AppID, config.AppSecret)
 	fields, err := larkService.GetTableFields(appToken, tableID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -274,11 +239,15 @@ func GetTableFields(c *gin.Context) {
 	c.JSON(http.StatusOK, fields)
 }
 
-// AddRecord 新增记录
+// AddRecord 添加记录
 func AddRecord(c *gin.Context) {
-	cacheMutex.RLock()
-	config := configCache
-	cacheMutex.RUnlock()
+	if configService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "配置服务未初始化"})
+		return
+	}
+
+	// 获取配置
+	config := configService.GetConfig()
 
 	if config.AppID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请先配置飞书应用信息"})
@@ -286,10 +255,10 @@ func AddRecord(c *gin.Context) {
 	}
 
 	// 输出当前配置信息（用于调试）
-	fmt.Printf("当前配置信息：\n")
-	fmt.Printf("- AppID: %s\n", config.AppID)
-	fmt.Printf("- GroupChatID: %s\n", config.GroupChatID)
-	fmt.Printf("- Tables配置数量: %d\n", len(config.Tables))
+	logInfo("当前配置信息：")
+	logInfo("- AppID: %s", config.AppID)
+	logInfo("- GroupChatID: %s", config.GroupChatID)
+	logInfo("- Tables配置数量: %d", len(config.Tables))
 
 	var req models.AddRecordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -297,7 +266,7 @@ func AddRecord(c *gin.Context) {
 		return
 	}
 
-	larkService := services.NewLarkService(config.AppID, config.AppSecret)
+	larkService := serviceManager.GetLarkService(config.AppID, config.AppSecret)
 	recordID, err := larkService.AddRecord(req.AppToken, req.TableID, req.Fields)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -677,9 +646,13 @@ func AddRecord(c *gin.Context) {
 
 // GetAIModels 获取可用的AI模型列表
 func GetAIModels(c *gin.Context) {
-	cacheMutex.RLock()
-	config := configCache
-	cacheMutex.RUnlock()
+	if configService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "配置服务未初始化"})
+		return
+	}
+
+	// 获取配置
+	config := configService.GetConfig()
 
 	// 验证配置
 	if config.SiliconFlow.ApiKey == "" {
@@ -708,9 +681,13 @@ func AIParse(c *gin.Context) {
 		fmt.Printf("[AIParse] 请求处理总耗时: %v\n", elapsed)
 	}()
 
-	cacheMutex.RLock()
-	config := configCache
-	cacheMutex.RUnlock()
+	if configService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "配置服务未初始化"})
+		return
+	}
+
+	// 获取配置
+	config := configService.GetConfig()
 
 	// 验证配置
 	if config.SiliconFlow.ApiKey == "" {
@@ -751,9 +728,13 @@ func AIParse(c *gin.Context) {
 
 // CheckRecordStatus 检查记录状态
 func CheckRecordStatus(c *gin.Context) {
-	cacheMutex.RLock()
-	config := configCache
-	cacheMutex.RUnlock()
+	if configService == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "配置服务未初始化"})
+		return
+	}
+
+	// 获取配置
+	config := configService.GetConfig()
 
 	if config.AppID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请先配置飞书应用信息"})

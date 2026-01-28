@@ -1,11 +1,9 @@
 package services
 
 import (
-	"bytes"
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"strings"
 	"sync"
@@ -41,6 +39,7 @@ func (s *AIService) cleanExpiredCache() {
 
 // AIService AI服务
 type AIService struct {
+	BaseService
 	config *models.SiliconFlowConfig
 	// AI解析结果缓存
 	parseCache     sync.Map
@@ -49,8 +48,12 @@ type AIService struct {
 
 // NewAIService 创建AI服务实例
 func NewAIService(config *models.SiliconFlowConfig) *AIService {
+	// 创建基础服务实例
+	baseService := NewBaseService("", "")
+	
 	// 创建服务实例
 	aiService := &AIService{
+		BaseService:    baseService,
 		config:        config,
 		parseCache:    sync.Map{},
 		parseCacheTime: sync.Map{},
@@ -94,33 +97,15 @@ func (s *AIService) GetModels() ([]string, error) {
 		return nil, fmt.Errorf("SiliconFlow API key not configured")
 	}
 
-	// 创建HTTP请求
-	req, err := http.NewRequest("GET", "https://api.siliconflow.cn/v1/models", nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
-	}
-
-	// 设置请求头
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.config.ApiKey))
-
-	// 发送请求
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	// 使用BaseService的handleHTTPRequest方法发送请求
+	resp, bodyBytes, err := s.handleHTTPRequest("GET", "https://api.siliconflow.cn/v1/models", s.config.ApiKey, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
-	defer resp.Body.Close()
 
 	// 检查响应状态
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
 		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
-	}
-
-	// 解析响应
-	bodyBytes, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %v", err)
 	}
 
 	var response SiliconFlowModelsResponse
@@ -148,11 +133,11 @@ func (s *AIService) ParseWithAI(content string, prompt string) (string, error) {
 	startTime := time.Now()
 	defer func() {
 		elapsed := time.Since(startTime)
-		fmt.Printf("[AI解析] 总耗时: %v\n", elapsed)
+		logInfo("[AI解析] 总耗时: %v", elapsed)
 	}()
 
-	fmt.Printf("[AI解析] 输入内容: %s\n", content)
-	fmt.Printf("[AI解析] 提示词: %s\n", prompt)
+	logInfo("[AI解析] 输入内容: %s", content)
+	logInfo("[AI解析] 提示词: %s", prompt)
 
 	if s.config.ApiKey == "" {
 		return "", fmt.Errorf("SiliconFlow API key not configured")
@@ -180,7 +165,7 @@ func (s *AIService) ParseWithAI(content string, prompt string) (string, error) {
 		if cachedTime, ok := s.parseCacheTime.Load(cacheKey); ok {
 			// 缓存有效期
 			if time.Since(cachedTime.(time.Time)) < AIParseCacheExpireTime {
-				fmt.Printf("[AI解析] 使用缓存结果\n")
+				logInfo("[AI解析] 使用缓存结果")
 				return cachedResult.(string), nil
 			}
 		}
@@ -207,40 +192,28 @@ func (s *AIService) ParseWithAI(content string, prompt string) (string, error) {
 		return "", fmt.Errorf("failed to marshal request: %v", err)
 	}
 
-	// 创建HTTP请求
-	req, err := http.NewRequest("POST", "https://api.siliconflow.cn/v1/chat/completions", bytes.NewBuffer(jsonData))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %v", err)
-	}
-
-	// 设置请求头
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.config.ApiKey))
-
 	// 发送请求（带重试机制）
 	var resp *http.Response
 	var responseBody []byte
 	retryDelay := InitialRetryDelay
 	
 	for i := 0; i < MaxRetries; i++ {
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err = client.Do(req)
+		// 使用BaseService的handleHTTPRequest方法发送请求
+		resp, responseBody, err = s.handleHTTPRequest("POST", "https://api.siliconflow.cn/v1/chat/completions", s.config.ApiKey, jsonData)
 		
-		if err == nil {
-			// 读取响应体
-			responseBody, err = ioutil.ReadAll(resp.Body)
-			resp.Body.Close()
-			
-			if err == nil && resp.StatusCode == http.StatusOK {
-				break // 请求成功
-			}
+		if err == nil && resp.StatusCode == http.StatusOK {
+			break // 请求成功
+		}
+		
+		if err != nil {
+			logError("[AI解析] 请求失败: %v", err)
 		} else {
-			fmt.Printf("[AI解析] 请求失败: %v\n", err)
+			logError("[AI解析] 请求失败，状态码: %d, 响应: %s", resp.StatusCode, string(responseBody))
 		}
 		
 		if i < MaxRetries-1 {
 			// 重试间隔：指数退避策略
-			fmt.Printf("[AI解析] %v后重试... (第%d/%d次)\n", retryDelay, i+2, MaxRetries)
+			logInfo("[AI解析] %v后重试... (第%d/%d次)", retryDelay, i+2, MaxRetries)
 			time.Sleep(retryDelay)
 			retryDelay *= 2 // 指数退避
 		}
