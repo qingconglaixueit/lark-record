@@ -475,145 +475,21 @@ func AddRecord(c *gin.Context) {
 					}
 
 					// 检查是否需要创建任务
-					for _, table := range config.Tables {
-						if table.AppToken == req.AppToken && table.TableID == req.TableID && table.CreateTask {
+			for _, table := range config.Tables {
+				if table.AppToken == req.AppToken && table.TableID == req.TableID {
+					// 使用异步方式创建任务，避免阻塞主线程
+						go func(tableConfig models.TableConfig) {
 							fmt.Printf("🔄 开始创建任务...\n")
-
-							// 从配置的字段中获取任务信息
-							var taskTitle string
-							var dueTimestamp int64
-							var assignees []map[string]interface{}
-							var isAllDay bool = true
-
-							// 1. 获取任务标题
-							if table.TaskSummaryField != "" {
-								if value, exists := fieldValues[table.TaskSummaryField]; exists {
-									switch v := value.(type) {
-									case string:
-										taskTitle = v
-									case float64:
-										taskTitle = fmt.Sprintf("%v", v)
-									case []interface{}:
-										// 处理数组类型的值
-										for i, item := range v {
-											if i > 0 {
-												taskTitle += ", "
-											}
-											taskTitle += fmt.Sprintf("%v", item)
-										}
-									default:
-										taskTitle = fmt.Sprintf("%v", v)
-									}
-								}
-							}
-
-							// 如果没有找到任务标题，使用默认标题
-							if taskTitle == "" {
-								taskTitle = "来自多维表格的任务"
-							}
-							fmt.Printf("📝 任务标题: %s\n", taskTitle)
-
-							// 2. 获取任务截止时间
-							if table.TaskDueField != "" {
-								if value, exists := fieldValues[table.TaskDueField]; exists {
-									// 处理时间戳，支持int64和float64两种类型
-									var timestamp int64
-									switch v := value.(type) {
-									case int64:
-										timestamp = v
-									case float64:
-										timestamp = int64(v)
-									default:
-										break
-									}
-
-									if timestamp > 0 && timestamp < 3250368000000 {
-										// 这看起来是一个有效的时间戳
-										dueTimestamp = timestamp
-										// 转换为东八区时间以便显示
-										t := time.Unix(timestamp/1000, 0).In(time.FixedZone("Asia/Shanghai", 8*3600))
-										fmt.Printf("⏰ 任务截止时间: %s\n", t.Format("2006-01-02 15:04:05"))
-									}
-								}
-							}
-
-							// 如果没有找到有效的截止时间，使用当前时间加1天
-							if dueTimestamp == 0 {
-								dueTimestamp = time.Now().Add(24 * time.Hour).UnixMilli()
-								fmt.Printf("⏰ 使用默认截止时间: 24小时后\n")
-							}
-
-							// 3. 获取任务负责人
-							if table.TaskAssigneeField != "" {
-								if value, exists := fieldValues[table.TaskAssigneeField]; exists {
-									// 处理单个用户
-									if userMap, ok := value.(map[string]interface{}); ok {
-										if id, ok := userMap["id"].(string); ok {
-											assignees = append(assignees, map[string]interface{}{
-												"id": id,
-											})
-											fmt.Printf("👤 任务负责人: %s\n", id)
-										}
-									} else if userArray, ok := value.([]interface{}); ok {
-										// 处理用户数组
-										for _, userItem := range userArray {
-											if userMap, ok := userItem.(map[string]interface{}); ok {
-												if id, ok := userMap["id"].(string); ok {
-													assignees = append(assignees, map[string]interface{}{
-														"id": id,
-													})
-													fmt.Printf("👤 任务负责人: %s\n", id)
-												}
-											}
-										}
-									}
-								}
-							}
-
-							// 如果没有配置任务负责人字段，尝试查找user类型的字段
-							if len(assignees) == 0 {
-								for _, value := range fieldValues {
-									// 处理单个用户
-									if userMap, ok := value.(map[string]interface{}); ok {
-										if id, ok := userMap["id"].(string); ok {
-											assignees = append(assignees, map[string]interface{}{
-												"id": id,
-											})
-											fmt.Printf("👤 自动找到任务负责人: %s\n", id)
-											break
-										}
-									} else if userArray, ok := value.([]interface{}); ok {
-										// 处理用户数组
-										for _, userItem := range userArray {
-											if userMap, ok := userItem.(map[string]interface{}); ok {
-												if id, ok := userMap["id"].(string); ok {
-													assignees = append(assignees, map[string]interface{}{
-														"id": id,
-													})
-													fmt.Printf("👤 自动找到任务负责人: %s\n", id)
-													break
-												}
-											}
-										}
-									}
-								}
-							}
-
-							// 创建任务
-							if len(assignees) > 0 {
-								err := larkService.CreateTask(taskTitle, dueTimestamp, isAllDay, assignees)
-								if err != nil {
-									fmt.Printf("❌ 创建任务失败: %v\n", err)
-								} else {
-									fmt.Printf("✅ 任务创建成功！\n")
-								}
+							err := larkService.CreateTaskFromFieldValues(tableConfig, fieldValues)
+							if err != nil {
+								fmt.Printf("❌ 创建任务失败: %v\n", err)
 							} else {
-								fmt.Printf("⚠️ 未找到任务负责人信息，无法创建任务\n")
+								fmt.Printf("✅ 任务创建成功！\n")
 							}
-
-							break
-						}
-					}
+						}(table)
+					break
+				}
+			}
 
 					break
 				} else {

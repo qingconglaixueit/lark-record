@@ -246,6 +246,12 @@ func (s *LarkService) GetBitableTables(appToken string, isWiki bool) ([]models.T
 	return s.bitableService.GetBitableTables(appToken, isWiki)
 }
 
+// CreateTaskFromFieldValues 从字段值创建任务
+// 该方法将调用taskService的同名方法
+func (s *LarkService) CreateTaskFromFieldValues(tableConfig models.TableConfig, fieldValues map[string]interface{}) error {
+	return s.taskService.CreateTaskFromFieldValues(tableConfig, fieldValues)
+}
+
 // GetTenantAccessToken 获取租户访问令牌
 // 使用双重检查锁定模式确保并发安全
 // 缓存令牌并在过期前自动刷新

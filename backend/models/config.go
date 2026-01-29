@@ -36,6 +36,16 @@ type Config struct {
 	CheckFields []string     `json:"check_fields,omitempty"`
 }
 
+// TaskConfig 任务配置
+type TaskConfig struct {
+	Enabled           bool   `json:"enabled"`           // 是否启用任务创建
+	SummaryField      string `json:"summary_field"`      // 任务标题字段
+	DueField          string `json:"due_field"`          // 任务截止日期字段
+	AssigneeField     string `json:"assignee_field"`     // 任务负责人字段
+	DefaultSummary    string `json:"default_summary"`    // 默认任务标题
+	DefaultDueDays    int    `json:"default_due_days"`   // 默认截止天数
+}
+
 // TableConfig 单个表格的配置
 type TableConfig struct {
 	URL               string        `json:"url"`                 // 飞书多维表格URL
@@ -44,11 +54,14 @@ type TableConfig struct {
 	Name              string        `json:"name"`                // 表格名称
 	WriteFields       []WriteField  `json:"write_fields"`        // 待写入的字段
 	CheckFields       []string      `json:"check_fields"`        // 需要检测是否有值的字段
-	CreateTask        bool          `json:"create_task"`         // 是否创建任务
-	TaskSummaryField  string        `json:"task_summary_field"`  // 任务标题字段
-	TaskDueField      string        `json:"task_due_field"`      // 任务截止日期字段
-	TaskAssigneeField string        `json:"task_assignee_field"` // 任务负责人字段
+	Task              TaskConfig    `json:"task"`                // 任务配置
 	AIParse           AIParseConfig `json:"ai_parse"`            // AI解析配置
+
+	// 向后兼容旧版本配置
+	CreateTask        bool   `json:"create_task,omitempty"`         // 是否创建任务
+	TaskSummaryField  string `json:"task_summary_field,omitempty"`  // 任务标题字段
+	TaskDueField      string `json:"task_due_field,omitempty"`      // 任务截止日期字段
+	TaskAssigneeField string `json:"task_assignee_field,omitempty"` // 任务负责人字段
 }
 
 // Bitable 飞书多维表格
